@@ -1,4 +1,4 @@
-# Nova Agent Control Panel
+# Evoco Control Panel
 
 A voice and text-controlled autonomous web agent powered by Amazon Nova. Speak or type a task, watch the AI plan and execute it in real-time, and receive structured results.
 
