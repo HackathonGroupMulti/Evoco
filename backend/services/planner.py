@@ -1,6 +1,7 @@
 """Task planner powered by Amazon Nova 2 Lite via Bedrock.
 
-Decomposes a natural-language command into an ordered list of TaskSteps.
+Decomposes a natural-language command into a DAG of TaskSteps with
+executor routing (browser vs LLM) and parallel branch support.
 Falls back to a deterministic mock plan when AWS credentials are missing.
 """
 
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -15,7 +17,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from backend.config import settings
-from backend.models.task import TaskPlan, TaskStep
+from backend.models.task import ExecutorType, TaskPlan, TaskStep
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +25,35 @@ NOVA_MODEL_ID = "amazon.nova-lite-v1:0"
 
 SYSTEM_PROMPT = """\
 You are an autonomous task planner. Given a user command, decompose it into
-a list of concrete browser-automation steps.
+a list of concrete steps that an AI agent will execute.
+
+There are TWO types of executors:
+  - "browser": for steps that require visiting a website (navigate, search, extract, click, fill)
+  - "llm": for steps that require reasoning over data (compare, analyze, rank, summarize)
+
+Steps that can run in parallel should NOT depend on each other.
+For example, searching Amazon and searching Best Buy are independent and can run in parallel.
+Only add a dependency when a step truly needs the output of a prior step.
 
 Reply ONLY with a JSON array. Each element must have:
-  - "action": one of "navigate", "search", "extract", "compare", "summarize"
-  - "target": URL or site name
-  - "description": short human-readable description
+  - "action": the type of action (e.g. "navigate", "search", "extract", "compare", "summarize")
+  - "target": URL or site name (use "aggregated" for LLM steps that process collected data)
+  - "description": short human-readable description of what this step does
+  - "executor": "browser" or "llm"
+  - "group": a short label for the branch (e.g. "amazon", "bestbuy", "analysis"). Steps in the same group are sequential. Steps in different groups can run in parallel.
+  - "depends_on": array of step indices (0-based) that must complete before this step runs. Leave empty [] for steps with no dependencies. For LLM analysis steps, depend on all extract steps.
+
+Example for "compare laptops on Amazon and Best Buy":
+[
+  {"action": "navigate", "target": "https://www.amazon.com", "description": "Open Amazon", "executor": "browser", "group": "amazon", "depends_on": []},
+  {"action": "search", "target": "https://www.amazon.com", "description": "Search for laptops on Amazon", "executor": "browser", "group": "amazon", "depends_on": [0]},
+  {"action": "extract", "target": "https://www.amazon.com", "description": "Extract top results from Amazon", "executor": "browser", "group": "amazon", "depends_on": [1]},
+  {"action": "navigate", "target": "https://www.bestbuy.com", "description": "Open Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": []},
+  {"action": "search", "target": "https://www.bestbuy.com", "description": "Search for laptops on Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": [3]},
+  {"action": "extract", "target": "https://www.bestbuy.com", "description": "Extract top results from Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": [4]},
+  {"action": "compare", "target": "aggregated", "description": "Compare results across sites and rank by value", "executor": "llm", "group": "analysis", "depends_on": [2, 5]},
+  {"action": "summarize", "target": "aggregated", "description": "Produce final summary with recommendations", "executor": "llm", "group": "analysis", "depends_on": [6]}
+]
 
 Do NOT include any text outside the JSON array.
 """
@@ -49,7 +74,7 @@ def _call_nova(command: str) -> list[dict]:
     body = {
         "messages": [{"role": "user", "content": [{"text": command}]}],
         "system": [{"text": SYSTEM_PROMPT}],
-        "inferenceConfig": {"maxTokens": 1024, "temperature": 0.2},
+        "inferenceConfig": {"maxTokens": 2048, "temperature": 0.2},
     }
     response = client.invoke_model(
         modelId=NOVA_MODEL_ID,
@@ -59,78 +84,133 @@ def _call_nova(command: str) -> list[dict]:
     )
     result = json.loads(response["body"].read())
     text = result["output"]["message"]["content"][0]["text"]
-    return json.loads(text)
+
+    # Try parsing directly, then try extracting JSON from text
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
+
+
+def _call_nova_replan(command: str, failed_steps: list[dict], context: list[dict]) -> list[dict]:
+    """Ask Nova 2 Lite for an alternative plan after failures."""
+    client = _build_bedrock_client()
+    replan_prompt = (
+        f"Original command: {command}\n\n"
+        f"These steps failed:\n{json.dumps(failed_steps, indent=2)}\n\n"
+        f"Available context from successful steps:\n{json.dumps(context, indent=2)}\n\n"
+        "Generate an alternative plan to accomplish the original command. "
+        "Try different sites or approaches. Reply ONLY with a JSON array."
+    )
+    body = {
+        "messages": [{"role": "user", "content": [{"text": replan_prompt}]}],
+        "system": [{"text": SYSTEM_PROMPT}],
+        "inferenceConfig": {"maxTokens": 2048, "temperature": 0.3},
+    }
+    response = client.invoke_model(
+        modelId=NOVA_MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(body),
+    )
+    result = json.loads(response["body"].read())
+    text = result["output"]["message"]["content"][0]["text"]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
 
 
 def _mock_plan(command: str) -> list[dict]:
     """Generate a reasonable mock plan based on keyword heuristics."""
     cmd = command.lower()
 
-    sites: list[str] = []
+    sites: list[tuple[str, str]] = []
     for kw, url in [
         ("amazon", "https://www.amazon.com"),
         ("best buy", "https://www.bestbuy.com"),
         ("newegg", "https://www.newegg.com"),
         ("walmart", "https://www.walmart.com"),
         ("ebay", "https://www.ebay.com"),
+        ("linkedin", "https://www.linkedin.com"),
+        ("indeed", "https://www.indeed.com"),
+        ("zillow", "https://www.zillow.com"),
+        ("yelp", "https://www.yelp.com"),
     ]:
         if kw in cmd:
-            sites.append(url)
+            group = kw.replace(" ", "")
+            sites.append((url, group))
 
     if not sites:
-        sites = ["https://www.amazon.com", "https://www.bestbuy.com"]
+        sites = [("https://www.google.com", "google")]
 
     steps: list[dict] = []
-    for url in sites:
-        steps.append(
-            {"action": "navigate", "target": url, "description": f"Open {url}"}
-        )
-        steps.append(
-            {
-                "action": "search",
-                "target": url,
-                "description": f"Search for the requested product on {url}",
-            }
-        )
-        steps.append(
-            {
-                "action": "extract",
-                "target": url,
-                "description": f"Extract top results from {url}",
-            }
-        )
+    extract_indices: list[int] = []
 
-    steps.append(
-        {
-            "action": "compare",
-            "target": "all",
-            "description": "Compare extracted results across sites",
-        }
-    )
-    steps.append(
-        {
-            "action": "summarize",
-            "target": "all",
-            "description": "Produce final ranked summary",
-        }
-    )
+    for url, group in sites:
+        base_idx = len(steps)
+        steps.append({
+            "action": "navigate", "target": url,
+            "description": f"Open {url}",
+            "executor": "browser", "group": group, "depends_on": [],
+        })
+        steps.append({
+            "action": "search", "target": url,
+            "description": f"Search for the requested information on {url}",
+            "executor": "browser", "group": group, "depends_on": [base_idx],
+        })
+        steps.append({
+            "action": "extract", "target": url,
+            "description": f"Extract top results from {url}",
+            "executor": "browser", "group": group, "depends_on": [base_idx + 1],
+        })
+        extract_indices.append(base_idx + 2)
+
+    steps.append({
+        "action": "compare", "target": "aggregated",
+        "description": "Compare and rank extracted results across all sources",
+        "executor": "llm", "group": "analysis", "depends_on": extract_indices,
+    })
+    steps.append({
+        "action": "summarize", "target": "aggregated",
+        "description": "Produce final summary with recommendations",
+        "executor": "llm", "group": "analysis", "depends_on": [len(steps) - 1],
+    })
     return steps
 
 
 def _steps_from_raw(raw: list[dict], task_id: str) -> list[TaskStep]:
-    """Convert raw dicts into TaskStep models with dependency chains."""
+    """Convert raw dicts into TaskStep models, resolving index-based depends_on to IDs."""
+    # First pass: create steps with generated IDs
     steps: list[TaskStep] = []
-    prev_id: str | None = None
     for item in raw:
         step = TaskStep(
             id=uuid.uuid4().hex[:8],
             action=item.get("action", "unknown"),
             target=item.get("target", ""),
             description=item.get("description", ""),
-            depends_on=[prev_id] if prev_id else [],
+            executor=ExecutorType(item.get("executor", "browser")),
+            group=item.get("group", ""),
         )
         steps.append(step)
-        prev_id = step.id
+
+    # Second pass: resolve index-based depends_on to step IDs
+    for i, item in enumerate(raw):
+        raw_deps = item.get("depends_on", [])
+        resolved: list[str] = []
+        for dep in raw_deps:
+            if isinstance(dep, int) and 0 <= dep < len(steps):
+                resolved.append(steps[dep].id)
+            elif isinstance(dep, str):
+                resolved.append(dep)
+        steps[i].depends_on = resolved
+
     return steps
 
 
@@ -148,6 +228,23 @@ async def create_plan(command: str, task_id: str) -> TaskPlan:
             logger.info("Plan generated via mock fallback (%d steps)", len(raw))
     except (BotoCoreError, ClientError, json.JSONDecodeError) as exc:
         logger.warning("Nova planner failed, using mock: %s", exc)
+        raw = _mock_plan(command)
+
+    steps = _steps_from_raw(raw, task_id)
+    return TaskPlan(task_id=task_id, original_command=command, steps=steps)
+
+
+async def replan(command: str, failed_steps: list[dict], context: list[dict], task_id: str) -> TaskPlan:
+    """Generate an alternative plan after step failures."""
+    try:
+        if settings.has_aws_credentials:
+            raw = _call_nova_replan(command, failed_steps, context)
+            logger.info("Re-plan generated via Nova 2 Lite (%d steps)", len(raw))
+        else:
+            raw = _mock_plan(command)
+            logger.info("Re-plan generated via mock fallback (%d steps)", len(raw))
+    except (BotoCoreError, ClientError, json.JSONDecodeError) as exc:
+        logger.warning("Nova re-planner failed, using mock: %s", exc)
         raw = _mock_plan(command)
 
     steps = _steps_from_raw(raw, task_id)

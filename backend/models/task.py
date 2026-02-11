@@ -22,13 +22,20 @@ class StepStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class ExecutorType(str, Enum):
+    BROWSER = "browser"
+    LLM = "llm"
+
+
 class TaskStatus(str, Enum):
     QUEUED = "queued"
     PLANNING = "planning"
     EXECUTING = "executing"
     COMPLETED = "completed"
+    PARTIAL = "partial"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    REPLANNING = "replanning"
 
 
 # ---------- Request models ----------
@@ -53,9 +60,14 @@ class TaskStep(BaseModel):
     action: str
     target: str = ""
     description: str = ""
+    executor: ExecutorType = ExecutorType.BROWSER
+    group: str = ""
     status: StepStatus = StepStatus.PENDING
     result: Any = None
     error: str | None = None
+    retries: int = 0
+    max_retries: int = 2
+    cost_usd: float = 0.0
     started_at: datetime | None = None
     finished_at: datetime | None = None
     depends_on: list[str] = Field(default_factory=list)
@@ -92,6 +104,7 @@ class TaskResult(BaseModel):
     output: Any = None
     output_format: OutputFormat = OutputFormat.JSON
     error: str | None = None
+    cost_usd: float = 0.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime | None = None
     duration_ms: int | None = None

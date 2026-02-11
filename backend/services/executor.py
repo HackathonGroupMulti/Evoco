@@ -1,7 +1,7 @@
-"""Step executor powered by Amazon Nova Act.
+"""Step executor — routes to Nova Act (browser) or Nova 2 Lite (LLM).
 
-Each TaskStep is executed against a headless browser session.
-Falls back to mock results when the Nova Act API key is missing.
+Supports structured extraction schemas, retry with backoff,
+and mock fallbacks when credentials are missing.
 """
 
 from __future__ import annotations
@@ -12,29 +12,75 @@ import random
 from typing import Any
 
 from backend.config import settings
-from backend.models.task import TaskStep
+from backend.models.task import ExecutorType, TaskStep
+from backend.services.cost import estimate_browser_cost
+from backend.services.result_parser import parse_result
+from backend.services.schemas import schema_for_action
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Nova Act integration (real)
+# Nova Act integration (browser)
 # ---------------------------------------------------------------------------
 
-async def _execute_with_nova_act(step: TaskStep) -> dict[str, Any]:
+async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, Any]:
     """Execute a single step using the Nova Act SDK."""
     from nova_act import NovaAct  # type: ignore[import-untyped]
 
-    async with NovaAct(
-        api_key=settings.nova_act_api_key,
-        starting_page=step.target if step.target.startswith("http") else "https://www.google.com",
-        headless=settings.headless_browser,
-    ) as act:
-        result = await asyncio.to_thread(act.act, step.description)
+    extract_actions = {"search", "extract"}
+    schema = schema_for_action(step.action)
+
+    def _run() -> dict[str, Any]:
+        # Use pool session if available, otherwise create new
+        if pool is not None:
+            nova = pool.get_session(step.target)
+            if nova is not None:
+                return _run_in_session(nova, step, extract_actions, schema)
+
+        with NovaAct(
+            nova_act_api_key=settings.nova_act_api_key,
+            starting_page=step.target if step.target.startswith("http") else "https://www.google.com",
+            headless=settings.headless_browser,
+            tty=False,
+        ) as nova:
+            return _run_in_session(nova, step, extract_actions, schema)
+
+    return await asyncio.to_thread(_run)
+
+
+def _run_in_session(
+    nova: Any, step: TaskStep, extract_actions: set, schema: dict | None
+) -> dict[str, Any]:
+    """Execute a step within an existing Nova Act session."""
+    if step.action in extract_actions and schema:
+        result = nova.act_get(step.description, schema=schema)
+        parsed = parse_result(result.response, getattr(result, "parsed_response", None))
         return {
-            "success": result.response is not None,
-            "response": result.response,
+            "success": True,
+            "response": parsed,
             "url": step.target,
+            "cost_usd": estimate_browser_cost(),
+            "executor": "browser",
+        }
+    elif step.action in extract_actions:
+        result = nova.act_get(step.description)
+        parsed = parse_result(result.response)
+        return {
+            "success": True,
+            "response": parsed,
+            "url": step.target,
+            "cost_usd": estimate_browser_cost(),
+            "executor": "browser",
+        }
+    else:
+        result = nova.act(step.description)
+        return {
+            "success": True,
+            "url": step.target,
+            "steps_taken": result.metadata.num_steps_executed,
+            "cost_usd": estimate_browser_cost(),
+            "executor": "browser",
         }
 
 
@@ -100,21 +146,55 @@ def _mock_result_for_step(step: TaskStep) -> dict[str, Any]:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def execute_step(step: TaskStep) -> dict[str, Any]:
+async def execute_step(
+    step: TaskStep,
+    context: list[dict[str, Any]] | None = None,
+    pool: Any = None,
+) -> dict[str, Any]:
     """Execute a single TaskStep and return the result dict.
 
-    Uses Nova Act when the API key is configured, otherwise returns mock data.
+    Routes to browser (Nova Act) or LLM (Nova 2 Lite) based on step.executor.
+    Includes retry with exponential backoff.
     """
-    try:
-        if settings.has_nova_act_key:
-            result = await _execute_with_nova_act(step)
-            logger.info("Step %s executed via Nova Act", step.id)
-        else:
-            # Simulate latency for realistic demo
-            await asyncio.sleep(random.uniform(0.3, 1.0))
-            result = _mock_result_for_step(step)
-            logger.info("Step %s executed via mock fallback", step.id)
-        return result
-    except Exception as exc:
-        logger.error("Step %s execution failed: %s", step.id, exc)
-        return {"success": False, "error": str(exc)}
+    from backend.services.llm_executor import execute_with_llm, mock_llm_execute
+
+    context = context or []
+    last_error: Exception | None = None
+
+    for attempt in range(step.max_retries + 1):
+        try:
+            if step.executor == ExecutorType.LLM:
+                # LLM steps — reasoning over collected data
+                if settings.has_aws_credentials:
+                    result = await execute_with_llm(step, context)
+                else:
+                    result = await mock_llm_execute(step, context)
+                logger.info("Step %s executed via LLM (attempt %d)", step.id, attempt + 1)
+            else:
+                # Browser steps — Nova Act
+                if settings.has_nova_act_key:
+                    result = await _execute_with_nova_act(step, pool=pool)
+                    logger.info("Step %s executed via Nova Act (attempt %d)", step.id, attempt + 1)
+                else:
+                    await asyncio.sleep(random.uniform(0.3, 1.0))
+                    result = _mock_result_for_step(step)
+                    logger.info("Step %s executed via mock (attempt %d)", step.id, attempt + 1)
+
+            step.retries = attempt
+            step.cost_usd = result.get("cost_usd", 0.0)
+            return result
+
+        except Exception as exc:
+            last_error = exc
+            step.retries = attempt + 1
+            if attempt < step.max_retries:
+                wait = 2 ** attempt
+                logger.warning(
+                    "Step %s attempt %d failed (%s), retrying in %ds",
+                    step.id, attempt + 1, exc, wait,
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.error("Step %s failed after %d attempts: %s", step.id, attempt + 1, exc)
+
+    return {"success": False, "error": str(last_error)}
