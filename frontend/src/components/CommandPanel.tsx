@@ -16,10 +16,16 @@ interface CommandPanelProps {
   onSelectHistory: (task: TaskResult) => void;
 }
 
-const FORMAT_OPTIONS: { value: OutputFormat; label: string }[] = [
-  { value: "json", label: "JSON" },
-  { value: "csv", label: "CSV" },
-  { value: "summary", label: "Summary" },
+const FORMAT_OPTIONS: { value: OutputFormat; label: string; desc: string }[] = [
+  { value: "summary", label: "Summary", desc: "Natural language" },
+  { value: "json", label: "JSON", desc: "Structured data" },
+  { value: "csv", label: "CSV", desc: "Spreadsheet" },
+];
+
+const QUICK_ACTIONS = [
+  { label: "Laptops", command: "Find the best laptop under $800 from Amazon and Best Buy" },
+  { label: "Headphones", command: "Compare top noise-cancelling headphones under $300 on Amazon" },
+  { label: "Monitors", command: "Find best 27-inch gaming monitors under $400 on Amazon and Newegg" },
 ];
 
 export function CommandPanel({
@@ -29,7 +35,7 @@ export function CommandPanel({
   onSelectHistory,
 }: CommandPanelProps) {
   const [command, setCommand] = useState("");
-  const [format, setFormat] = useState<OutputFormat>("json");
+  const [format, setFormat] = useState<OutputFormat>("summary");
 
   const isRunning = connectionState === "connecting" || connectionState === "running";
 
@@ -55,29 +61,49 @@ export function CommandPanel({
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="gradient-border rounded-lg">
             <Input
-              placeholder="e.g. Find the best laptop under $800…"
+              placeholder="What do you want to research?"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               disabled={isRunning}
               className="border-0 bg-background/50 focus-visible:ring-neon-cyan/30"
             />
           </div>
+
+          {/* Quick action chips */}
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_ACTIONS.map((qa) => (
+              <button
+                key={qa.label}
+                type="button"
+                disabled={isRunning}
+                onClick={() => {
+                  setCommand(qa.command);
+                }}
+                className="rounded-full px-2.5 py-1 text-[10px] font-medium bg-secondary/30 text-muted-foreground/60 hover:text-neon-cyan hover:bg-neon-cyan/[0.08] border border-transparent hover:border-neon-cyan/20 transition-all disabled:opacity-30"
+              >
+                {qa.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Format selector */}
           <div className="flex gap-1.5">
             {FORMAT_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => setFormat(opt.value)}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-200 ${
+                className={`flex-1 rounded-md px-2 py-1.5 text-center transition-all duration-200 ${
                   format === opt.value
                     ? "bg-gradient-to-r from-neon-cyan/20 to-neon-purple/20 text-neon-cyan border border-neon-cyan/30 glow-cyan"
                     : "bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary"
                 }`}
               >
-                {opt.label}
+                <span className="block text-xs font-medium">{opt.label}</span>
               </button>
             ))}
           </div>
+
           <Button
             type="submit"
             disabled={isRunning || !command.trim()}
@@ -86,10 +112,15 @@ export function CommandPanel({
             {isRunning ? (
               <span className="flex items-center gap-2">
                 <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
-                Running…
+                Researching...
               </span>
             ) : (
-              "Execute"
+              <span className="flex items-center gap-2">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                </svg>
+                Launch Research
+              </span>
             )}
           </Button>
         </form>

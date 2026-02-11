@@ -6,23 +6,24 @@ interface StatusBarProps {
   stepsTotal: number;
   stepsCompleted: number;
   durationMs?: number;
+  costUsd?: number;
   mode: "live" | "mock" | "unknown";
 }
 
 const STATE_CONFIG: Record<ConnectionState, { label: string; color: string; glow: string }> = {
   idle: { label: "Ready", color: "bg-muted-foreground/40", glow: "" },
   connecting: {
-    label: "Connecting…",
+    label: "Connecting...",
     color: "bg-neon-amber",
     glow: "shadow-[0_0_6px_var(--neon-amber)]",
   },
   running: {
-    label: "Executing",
+    label: "Agents working",
     color: "bg-neon-cyan animate-pulse",
     glow: "shadow-[0_0_6px_var(--neon-cyan)]",
   },
   done: {
-    label: "Complete",
+    label: "Research complete",
     color: "bg-neon-emerald",
     glow: "shadow-[0_0_6px_var(--neon-emerald)]",
   },
@@ -38,6 +39,7 @@ export function StatusBar({
   stepsTotal,
   stepsCompleted,
   durationMs,
+  costUsd,
   mode,
 }: StatusBarProps) {
   const state = STATE_CONFIG[connectionState];
@@ -79,6 +81,13 @@ export function StatusBar({
         </>
       )}
 
+      {costUsd != null && costUsd > 0 && (
+        <>
+          <span className="text-border/50">{"\u{2502}"}</span>
+          <span className="text-neon-amber/70">${costUsd.toFixed(4)}</span>
+        </>
+      )}
+
       <span className="ml-auto">
         <Badge
           variant="outline"
@@ -90,7 +99,7 @@ export function StatusBar({
                 : "border-border text-muted-foreground"
           }`}
         >
-          {mode === "live" ? "Live" : mode === "mock" ? "Mock" : "\u{2014}"}
+          {mode === "live" ? "Live" : mode === "mock" ? "Demo" : "\u{2014}"}
         </Badge>
       </span>
     </div>

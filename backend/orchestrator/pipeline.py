@@ -13,6 +13,7 @@ Pushes live WSEvent updates through a callback for real-time frontend sync.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -103,6 +104,14 @@ async def run_task(
         plan_start = datetime.now(timezone.utc)
 
         await on_event(WSEvent(task_id=task_id, event="planning_started", data={}))
+
+        # Emit a "thinking out loud" reasoning message
+        reasoning = _generate_reasoning(command)
+        await on_event(WSEvent(
+            task_id=task_id,
+            event="planning_reasoning",
+            data={"text": reasoning},
+        ))
 
         plan = await create_plan(command, task_id)
         store.set_plan(task_id, plan)
@@ -253,6 +262,50 @@ async def run_task(
         await pool.shutdown()
 
     return task
+
+
+def _generate_reasoning(command: str) -> str:
+    """Generate a human-friendly reasoning message about the planning approach.
+
+    This runs locally (no API call) to provide instant feedback while the
+    actual LLM planner works in the background.
+    """
+    cmd = command.lower()
+
+    # Detect sites mentioned
+    sites: list[str] = []
+    for name in ["amazon", "best buy", "newegg", "walmart", "ebay", "yelp", "zillow"]:
+        if name in cmd:
+            sites.append(name.title())
+
+    # Detect product/topic
+    topics = []
+    for kw in ["laptop", "headphone", "monitor", "phone", "tablet", "camera",
+               "tv", "speaker", "keyboard", "mouse", "watch", "earbuds",
+               "espresso", "coffee", "blender"]:
+        if kw in cmd:
+            topics.append(kw + "s" if not kw.endswith("s") else kw)
+
+    topic_str = topics[0] if topics else "what you're looking for"
+
+    if len(sites) >= 2:
+        site_list = " and ".join(sites)
+        return (
+            f"I'll search {site_list} simultaneously for {topic_str}. "
+            f"Each site gets its own browser agent running in parallel, "
+            f"then I'll compare everything and rank by value."
+        )
+    elif len(sites) == 1:
+        return (
+            f"I'll dispatch a browser agent to {sites[0]} to find {topic_str}. "
+            f"I'll extract structured data, then analyze and rank the results."
+        )
+    else:
+        return (
+            f"Let me figure out the best approach to research {topic_str}. "
+            f"I'll identify the right sites to search, extract data in parallel, "
+            f"and synthesize the results into a clear recommendation."
+        )
 
 
 def _build_trace(

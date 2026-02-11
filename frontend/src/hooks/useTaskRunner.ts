@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { OutputFormat, TaskResult, TaskStep, WSEvent } from "@/types";
+import type { OutputFormat, TaskResult, TaskStep, TaskTrace, WSEvent } from "@/types";
 
 export type ConnectionState = "idle" | "connecting" | "running" | "done" | "error";
 
@@ -9,6 +9,8 @@ interface UseTaskRunnerReturn {
   result: TaskResult | null;
   error: string | null;
   completedCount: number;
+  reasoning: string | null;
+  trace: TaskTrace | null;
   runTask: (command: string, outputFormat: OutputFormat) => void;
 }
 
@@ -18,6 +20,8 @@ export function useTaskRunner(): UseTaskRunnerReturn {
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
+  const [reasoning, setReasoning] = useState<string | null>(null);
+  const [trace, setTrace] = useState<TaskTrace | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   const runTask = useCallback((command: string, outputFormat: OutputFormat) => {
@@ -26,6 +30,8 @@ export function useTaskRunner(): UseTaskRunnerReturn {
     setResult(null);
     setError(null);
     setCompletedCount(0);
+    setReasoning(null);
+    setTrace(null);
     setConnectionState("connecting");
 
     // Close existing connection
@@ -68,6 +74,9 @@ export function useTaskRunner(): UseTaskRunnerReturn {
 
   function handleEvent(event: WSEvent) {
     switch (event.event) {
+      case "planning_reasoning":
+        setReasoning(event.data.text as string);
+        break;
       case "plan_ready": {
         const planSteps = (event.data.steps as TaskStep[]) ?? [];
         setSteps(planSteps.map((s) => ({ ...s, status: "pending" })));
@@ -100,8 +109,13 @@ export function useTaskRunner(): UseTaskRunnerReturn {
         );
         setCompletedCount((c) => c + 1);
         break;
+      case "task_done":
+        if (event.data.trace) {
+          setTrace(event.data.trace as TaskTrace);
+        }
+        break;
     }
   }
 
-  return { connectionState, steps, result, error, completedCount, runTask };
+  return { connectionState, steps, result, error, completedCount, reasoning, trace, runTask };
 }
