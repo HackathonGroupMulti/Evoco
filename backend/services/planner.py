@@ -66,13 +66,20 @@ Do NOT include any text outside the JSON array.
 """
 
 
+_bedrock_client: Any = None
+
+
 def _build_bedrock_client() -> Any:
-    return boto3.client(
-        "bedrock-runtime",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-    )
+    """Return a cached Bedrock client (boto3 clients are thread-safe)."""
+    global _bedrock_client
+    if _bedrock_client is None:
+        _bedrock_client = boto3.client(
+            "bedrock-runtime",
+            region_name=settings.aws_region,
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+        )
+    return _bedrock_client
 
 
 def _invoke_nova(user_text: str, temperature: float = 0.2) -> list[dict]:

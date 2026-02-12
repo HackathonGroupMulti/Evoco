@@ -50,23 +50,28 @@ class DAGExecutor:
         self.pool = pool
 
         self._steps: dict[str, TaskStep] = {s.id: s for s in plan.steps}
+        self._pending: set[str] = {s.id for s in plan.steps}
         self._completed: dict[str, dict[str, Any]] = {}
         self._failed_ids: set[str] = set()
 
     def _get_ready_steps(self) -> list[TaskStep]:
-        """Return steps whose dependencies are all met and not yet started."""
+        """Return steps whose dependencies are all met and not yet started.
+
+        Only scans steps still in the pending set — O(pending) instead of O(all).
+        """
         ready: list[TaskStep] = []
-        for step in self.plan.steps:
+        newly_removed: list[str] = []
+        for step_id in self._pending:
+            step = self._steps[step_id]
             if step.status != StepStatus.PENDING:
+                newly_removed.append(step_id)
                 continue
 
-            deps_failed = any(
-                dep_id in self._failed_ids for dep_id in step.depends_on
-            )
-            if deps_failed:
+            if step.depends_on and self._failed_ids & set(step.depends_on):
                 step.status = StepStatus.SKIPPED
                 step.error = "dependency failed"
                 self._failed_ids.add(step.id)
+                newly_removed.append(step_id)
                 logger.info(
                     "Skipping step %s (%s) — dependency chain broken",
                     step.id, step.action,
@@ -78,7 +83,9 @@ class DAGExecutor:
             )
             if deps_met:
                 ready.append(step)
+                newly_removed.append(step_id)
 
+        self._pending -= set(newly_removed)
         return ready
 
     def _collect_context_for(self, step: TaskStep) -> list[dict[str, Any]]:

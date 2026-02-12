@@ -11,10 +11,9 @@ import logging
 import re
 from typing import Any
 
-import boto3
-
 from backend.config import settings
 from backend.models.task import TaskStep
+from backend.services.cost import estimate_llm_cost
 from backend.services.result_parser import parse_result
 
 logger = logging.getLogger(__name__)
@@ -63,12 +62,9 @@ _DEFAULT_SYSTEM = (
 
 
 def _build_bedrock_client() -> Any:
-    return boto3.client(
-        "bedrock-runtime",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-    )
+    """Reuse the planner's cached Bedrock client."""
+    from backend.services.planner import _build_bedrock_client as _get_client
+    return _get_client()
 
 
 async def execute_with_llm(step: TaskStep, context: list[dict[str, Any]]) -> dict[str, Any]:
@@ -109,16 +105,11 @@ async def execute_with_llm(step: TaskStep, context: list[dict[str, Any]]) -> dic
         # Parse the response using multi-strategy parser
         parsed = parse_result(text)
 
-        # Calculate approximate cost
-        input_tokens = len(user_prompt.split()) * 1.3
-        output_tokens = len(text.split()) * 1.3
-        cost = (input_tokens / 1000 * 0.00006) + (output_tokens / 1000 * 0.00024)
-
         return {
             "success": True,
             "response": parsed,
             "raw_text": text,
-            "cost_usd": round(cost, 6),
+            "cost_usd": estimate_llm_cost(user_prompt, text),
             "executor": "llm",
         }
 

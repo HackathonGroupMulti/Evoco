@@ -19,7 +19,6 @@ import json
 import logging
 from typing import Any, AsyncGenerator
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from backend.config import settings
@@ -30,12 +29,9 @@ NOVA_SONIC_MODEL_ID = "amazon.nova-sonic-v1:0"
 
 
 def _build_bedrock_client() -> Any:
-    return boto3.client(
-        "bedrock-runtime",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-    )
+    """Reuse the planner's cached Bedrock client."""
+    from backend.services.planner import _build_bedrock_client as _get_client
+    return _get_client()
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +180,8 @@ class VoiceStream:
         the Bedrock streaming SDK for word-level real-time output.
         """
         try:
-            buffer: list[bytes] = []
+            audio_buf = bytearray()  # O(1) amortised append vs O(n) join
+            chunk_count = 0
             partial_interval = 10  # transcribe every N chunks for partial updates
 
             while True:
@@ -192,34 +189,33 @@ class VoiceStream:
                 if chunk is None:
                     break
 
-                buffer.append(chunk)
+                audio_buf.extend(chunk)
+                chunk_count += 1
 
                 # Emit progress indicator
-                if len(buffer) % partial_interval == 0 and settings.has_aws_credentials:
-                    # Run partial transcription on what we have so far
-                    partial_audio = b"".join(buffer)
+                if chunk_count % partial_interval == 0 and settings.has_aws_credentials:
+                    # Run partial transcription on accumulated audio
                     try:
                         partial_text = await transcribe(
-                            partial_audio, self.sample_rate, self.encoding
+                            bytes(audio_buf), self.sample_rate, self.encoding
                         )
                         if partial_text and partial_text != _mock_transcription():
                             self._transcript_parts.append(partial_text)
                             await self._partial_queue.put(partial_text)
                     except Exception as exc:
                         logger.debug("Partial transcription failed: %s", exc)
-                elif len(buffer) % partial_interval == 0:
+                elif chunk_count % partial_interval == 0:
                     # Mock mode: emit progress updates
                     mock_words = _mock_transcription().split()
-                    progress = min(len(buffer) // partial_interval, len(mock_words))
+                    progress = min(chunk_count // partial_interval, len(mock_words))
                     partial = " ".join(mock_words[:progress])
                     if partial:
                         await self._partial_queue.put(partial)
 
             # Final transcription on full audio
-            if buffer:
-                full_audio = b"".join(buffer)
+            if audio_buf:
                 self._final_text = await transcribe(
-                    full_audio, self.sample_rate, self.encoding
+                    bytes(audio_buf), self.sample_rate, self.encoding
                 )
                 await self._partial_queue.put(self._final_text)
             else:

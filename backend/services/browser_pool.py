@@ -55,6 +55,7 @@ class BrowserPool:
         Blocks if max concurrent browsers are already in use.
         Returns an existing session if one exists for this domain,
         or creates a new one. Returns None if Nova Act isn't configured.
+        Releases the semaphore automatically on failure to prevent leaks.
         """
         domain = self._domain_key(url)
         await self._semaphore.acquire()
@@ -62,20 +63,28 @@ class BrowserPool:
         if domain not in self._locks:
             self._locks[domain] = asyncio.Lock()
 
-        async with self._locks[domain]:
-            if domain in self._sessions:
-                logger.debug("Reusing browser session for %s", domain)
-                return self._sessions[domain]
+        try:
+            async with self._locks[domain]:
+                if domain in self._sessions:
+                    logger.debug("Reusing browser session for %s", domain)
+                    return self._sessions[domain]
 
-            session = await self._create_session(url)
-            if session is not None:
-                self._sessions[domain] = session
-                self._active_count += 1
-                logger.info(
-                    "Created browser session for %s (%d/%d active)",
-                    domain, self._active_count, self._max,
-                )
-            return session
+                session = await self._create_session(url)
+                if session is not None:
+                    self._sessions[domain] = session
+                    self._active_count += 1
+                    logger.info(
+                        "Created browser session for %s (%d/%d active)",
+                        domain, self._active_count, self._max,
+                    )
+                    return session
+
+                # Session creation failed — release semaphore to avoid leak
+                self._semaphore.release()
+                return None
+        except Exception:
+            self._semaphore.release()
+            raise
 
     async def release(self, url: str) -> None:
         """Release a semaphore slot (does NOT close the session)."""

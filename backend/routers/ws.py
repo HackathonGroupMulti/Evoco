@@ -25,24 +25,31 @@ router = APIRouter(tags=["websocket"])
 
 
 class ConnectionManager:
-    """Track active WebSocket connections per task."""
+    """Track active WebSocket connections per task.
+
+    Uses sets for O(1) add/discard instead of O(n) list.remove().
+    """
 
     def __init__(self) -> None:
-        self._connections: dict[str, list[WebSocket]] = {}
+        self._connections: dict[str, set[WebSocket]] = {}
 
     async def connect(self, task_id: str, ws: WebSocket) -> None:
         await ws.accept()
-        self._connections.setdefault(task_id, []).append(ws)
+        if task_id not in self._connections:
+            self._connections[task_id] = set()
+        self._connections[task_id].add(ws)
 
     def disconnect(self, task_id: str, ws: WebSocket) -> None:
-        conns = self._connections.get(task_id, [])
-        if ws in conns:
-            conns.remove(ws)
-        if not conns:
-            self._connections.pop(task_id, None)
+        conns = self._connections.get(task_id)
+        if conns is not None:
+            conns.discard(ws)
+            if not conns:
+                del self._connections[task_id]
 
     async def broadcast(self, event: WSEvent) -> None:
-        conns = self._connections.get(event.task_id, [])
+        conns = self._connections.get(event.task_id)
+        if not conns:
+            return
         payload = event.model_dump_json()
         dead: list[WebSocket] = []
         for ws in conns:
@@ -50,8 +57,10 @@ class ConnectionManager:
                 await ws.send_text(payload)
             except Exception:
                 dead.append(ws)
-        for ws in dead:
-            self.disconnect(event.task_id, ws)
+        if dead:
+            conns -= set(dead)
+            if not conns:
+                self._connections.pop(event.task_id, None)
 
 
 manager = ConnectionManager()

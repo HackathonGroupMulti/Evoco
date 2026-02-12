@@ -16,9 +16,10 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 async def create_task(body: TaskCommand, bg: BackgroundTasks) -> TaskResult:
     """Accept a text command and kick off the pipeline in the background."""
     task = store.new_task(body.command, body.output_format)
+    tid = task.task_id
 
     async def _run() -> None:
-        await run_task(body.command, body.output_format)
+        await run_task(body.command, body.output_format, task_id=tid)
 
     bg.add_task(_run)
     return task

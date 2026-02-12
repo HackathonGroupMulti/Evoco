@@ -45,17 +45,22 @@ def parse_result(raw: Any, parsed: Any = None) -> Any:
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Strategy 3: Regex extraction — find JSON array or object in mixed text
-    # Non-greedy to avoid matching far-apart brackets in large text
-    for label, pattern in (("array", r"\[[\s\S]*?\]"), ("object", r"\{[\s\S]*?\}")):
-        match = re.search(pattern, text)
-        if match:
-            try:
-                result = json.loads(match.group())
-                logger.debug("Parse strategy 3 (regex %s): success", label)
-                return result
-            except json.JSONDecodeError:
-                pass
+    # Strategy 3: Regex extraction — find JSON array or object in mixed text.
+    # Use greedy matching so nested structures like [[1,2],[3,4]] are captured
+    # fully, then fall back to non-greedy if greedy produces invalid JSON.
+    for label, greedy, nongreedy in (
+        ("array",  r"\[[\s\S]*\]",  r"\[[\s\S]*?\]"),
+        ("object", r"\{[\s\S]*\}",  r"\{[\s\S]*?\}"),
+    ):
+        for pattern in (greedy, nongreedy):
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    result = json.loads(match.group())
+                    logger.debug("Parse strategy 3 (regex %s): success", label)
+                    return result
+                except json.JSONDecodeError:
+                    continue
 
     # Strategy 4: LLM repair (deferred — calls back to Bedrock)
     try:
@@ -104,7 +109,12 @@ def _llm_repair(malformed: str) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"[\[{][\s\S]*?[\]}]", text)
-        if match:
-            return json.loads(match.group())
+        # Try greedy first, then non-greedy
+        for pattern in (r"[\[{][\s\S]*[\]}]", r"[\[{][\s\S]*?[\]}]"):
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    continue
     return None

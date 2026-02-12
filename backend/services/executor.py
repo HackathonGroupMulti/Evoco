@@ -154,6 +154,16 @@ _MOCK_PRODUCTS = [
     {"name": "Acer Aspire 5 Gaming", "price": 649.99, "rating": 4.0, "source": "newegg.com"},
 ]
 
+# Pre-indexed by domain for O(1) lookup instead of O(n) filter per call
+_MOCK_BY_DOMAIN: dict[str, list[dict[str, Any]]] = {}
+for _p in _MOCK_PRODUCTS:
+    _MOCK_BY_DOMAIN.setdefault(_p["source"], []).append(_p)
+
+# Pre-computed sorted/aggregated results (avoid re-sorting on every call)
+_MOCK_SORTED = sorted(_MOCK_PRODUCTS, key=lambda p: (-p["rating"], p["price"]))
+_MOCK_BEST = max(_MOCK_PRODUCTS, key=lambda p: p["rating"])
+_MOCK_CHEAPEST = min(_MOCK_PRODUCTS, key=lambda p: p["price"])
+
 
 def _mock_result_for_step(step: TaskStep) -> dict[str, Any]:
     """Return plausible mock data for any step type."""
@@ -162,35 +172,29 @@ def _mock_result_for_step(step: TaskStep) -> dict[str, Any]:
     if action == "navigate":
         return {"success": True, "url": step.target, "page_title": f"Homepage — {step.target}"}
 
-    if action == "search":
+    if action in ("search", "extract"):
         domain = step.target.replace("https://www.", "").rstrip("/")
-        products = [p for p in _MOCK_PRODUCTS if domain in p.get("source", "")]
+        products = _MOCK_BY_DOMAIN.get(domain)
         if not products:
             products = random.sample(_MOCK_PRODUCTS, k=min(3, len(_MOCK_PRODUCTS)))
-        return {"success": True, "results_count": len(products), "products": products}
-
-    if action == "extract":
-        domain = step.target.replace("https://www.", "").rstrip("/")
-        products = [p for p in _MOCK_PRODUCTS if domain in p.get("source", "")]
-        if not products:
-            products = random.sample(_MOCK_PRODUCTS, k=min(3, len(_MOCK_PRODUCTS)))
-        return {"success": True, "extracted": products}
+        key = "products" if action == "search" else "extracted"
+        result: dict[str, Any] = {"success": True, key: products}
+        if action == "search":
+            result["results_count"] = len(products)
+        return result
 
     if action == "compare":
-        sorted_products = sorted(_MOCK_PRODUCTS, key=lambda p: (-p["rating"], p["price"]))
-        return {"success": True, "ranked": sorted_products}
+        return {"success": True, "ranked": _MOCK_SORTED}
 
     if action == "summarize":
-        best = max(_MOCK_PRODUCTS, key=lambda p: p["rating"])
-        cheapest = min(_MOCK_PRODUCTS, key=lambda p: p["price"])
         return {
             "success": True,
             "summary": (
-                f"Best rated: {best['name']} (${best['price']}, {best['rating']} stars). "
-                f"Best value: {cheapest['name']} (${cheapest['price']}, {cheapest['rating']} stars)."
+                f"Best rated: {_MOCK_BEST['name']} (${_MOCK_BEST['price']}, {_MOCK_BEST['rating']} stars). "
+                f"Best value: {_MOCK_CHEAPEST['name']} (${_MOCK_CHEAPEST['price']}, {_MOCK_CHEAPEST['rating']} stars)."
             ),
-            "best_rated": best,
-            "best_value": cheapest,
+            "best_rated": _MOCK_BEST,
+            "best_value": _MOCK_CHEAPEST,
         }
 
     return {"success": True, "message": f"Executed {action} on {step.target}"}

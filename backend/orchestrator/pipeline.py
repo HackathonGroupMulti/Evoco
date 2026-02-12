@@ -41,10 +41,14 @@ async def _noop_callback(event: WSEvent) -> None:
 
 
 class TaskStore:
-    """In-memory task store (swap for Redis/DynamoDB in production)."""
+    """In-memory task store (swap for Redis/DynamoDB in production).
+
+    Maintains insertion-ordered list so list_tasks is O(limit) not O(n log n).
+    """
 
     def __init__(self) -> None:
         self._tasks: dict[str, TaskResult] = {}
+        self._ordered: list[TaskResult] = []  # newest first
         self._plans: dict[str, TaskPlan] = {}
 
     def new_task(self, command: str, output_format: OutputFormat) -> TaskResult:
@@ -56,6 +60,7 @@ class TaskStore:
             output_format=output_format,
         )
         self._tasks[task_id] = result
+        self._ordered.insert(0, result)  # newest first
         return result
 
     def get(self, task_id: str) -> TaskResult | None:
@@ -70,9 +75,8 @@ class TaskStore:
         return self._plans.get(task_id)
 
     def list_tasks(self, limit: int = 50) -> list[TaskResult]:
-        return sorted(
-            self._tasks.values(), key=lambda t: t.created_at, reverse=True
-        )[:limit]
+        """Return most recent tasks — O(limit) slice, no sorting needed."""
+        return self._ordered[:limit]
 
 
 # Singleton store
@@ -95,6 +99,7 @@ async def run_task(
     command: str,
     output_format: OutputFormat = OutputFormat.JSON,
     on_event: EventCallback = _noop_callback,
+    task_id: str | None = None,
 ) -> TaskResult:
     """Execute the full pipeline for a command and return the TaskResult.
 
@@ -104,8 +109,13 @@ async def run_task(
       3. Degradation — branch isolation + adaptive re-planning
       4. Output     — format final result
       5. Trace      — cost aggregation + timing waterfall
+
+    Args:
+        task_id: Optional pre-created task ID to reuse (avoids duplicate creation).
     """
-    task = store.new_task(command, output_format)
+    task = store.get(task_id) if task_id else None
+    if task is None:
+        task = store.new_task(command, output_format)
     task_id = task.task_id
     pool = BrowserPool()
 
@@ -247,6 +257,14 @@ async def run_task(
     return task
 
 
+_SITE_KEYWORDS = ("amazon", "best buy", "newegg", "walmart", "ebay", "yelp", "zillow")
+_TOPIC_KEYWORDS = (
+    "laptop", "headphone", "monitor", "phone", "tablet", "camera",
+    "tv", "speaker", "keyboard", "mouse", "watch", "earbuds",
+    "espresso", "coffee", "blender",
+)
+
+
 def _generate_reasoning(command: str) -> str:
     """Generate a human-friendly reasoning message about the planning approach.
 
@@ -256,18 +274,10 @@ def _generate_reasoning(command: str) -> str:
     cmd = command.lower()
 
     # Detect sites mentioned
-    sites: list[str] = []
-    for name in ["amazon", "best buy", "newegg", "walmart", "ebay", "yelp", "zillow"]:
-        if name in cmd:
-            sites.append(name.title())
+    sites = [name.title() for name in _SITE_KEYWORDS if name in cmd]
 
     # Detect product/topic
-    topics = []
-    for kw in ["laptop", "headphone", "monitor", "phone", "tablet", "camera",
-               "tv", "speaker", "keyboard", "mouse", "watch", "earbuds",
-               "espresso", "coffee", "blender"]:
-        if kw in cmd:
-            topics.append(kw + "s" if not kw.endswith("s") else kw)
+    topics = [kw + "s" if not kw.endswith("s") else kw for kw in _TOPIC_KEYWORDS if kw in cmd]
 
     topic_str = topics[0] if topics else "what you're looking for"
 
