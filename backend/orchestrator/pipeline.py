@@ -13,7 +13,6 @@ Pushes live WSEvent updates through a callback for real-time frontend sync.
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -80,6 +79,18 @@ class TaskStore:
 store = TaskStore()
 
 
+def _serialize_steps(plan: TaskPlan) -> list[dict[str, Any]]:
+    """Serialize plan steps to dicts for WS events (O(n) single pass)."""
+    return [
+        {
+            "id": s.id, "action": s.action, "target": s.target,
+            "description": s.description, "executor": s.executor.value,
+            "group": s.group, "depends_on": s.depends_on,
+        }
+        for s in plan.steps
+    ]
+
+
 async def run_task(
     command: str,
     output_format: OutputFormat = OutputFormat.JSON,
@@ -123,21 +134,7 @@ async def run_task(
         await on_event(WSEvent(
             task_id=task_id,
             event="plan_ready",
-            data={
-                "steps": [
-                    {
-                        "id": s.id,
-                        "action": s.action,
-                        "target": s.target,
-                        "description": s.description,
-                        "executor": s.executor.value,
-                        "group": s.group,
-                        "depends_on": s.depends_on,
-                    }
-                    for s in plan.steps
-                ],
-                "planning_ms": plan_duration_ms,
-            },
+            data={"steps": _serialize_steps(plan), "planning_ms": plan_duration_ms},
         ))
 
         # ---- Stage 2: DAG Execution ----
@@ -185,21 +182,7 @@ async def run_task(
             await on_event(WSEvent(
                 task_id=task_id,
                 event="plan_ready",
-                data={
-                    "steps": [
-                        {
-                            "id": s.id,
-                            "action": s.action,
-                            "target": s.target,
-                            "description": s.description,
-                            "executor": s.executor.value,
-                            "group": s.group,
-                            "depends_on": s.depends_on,
-                        }
-                        for s in plan.steps
-                    ],
-                    "is_replan": True,
-                },
+                data={"steps": _serialize_steps(plan), "is_replan": True},
             ))
 
             # Re-execute with the new plan
@@ -224,15 +207,13 @@ async def run_task(
         task.output = output
 
         # ---- Stage 6: Cost Aggregation + Timing Trace ----
-        total_cost = sum(s.cost_usd for s in plan.steps)
-        task.cost_usd = round(total_cost, 6)
-
         task.finished_at = datetime.now(timezone.utc)
         task.duration_ms = int(
             (task.finished_at - task.created_at).total_seconds() * 1000
         )
 
         trace = _build_trace(plan, plan_duration_ms, exec_duration_ms)
+        task.cost_usd = trace["total_cost_usd"]
 
         await on_event(WSEvent(
             task_id=task_id,
@@ -248,14 +229,16 @@ async def run_task(
         ))
 
     except Exception as exc:
-        logger.exception("Pipeline failed for task %s", task_id)
+        logger.exception(
+            "Pipeline FAILED for task %s — %s: %s", task_id, type(exc).__name__, exc
+        )
         task.status = TaskStatus.FAILED
-        task.error = str(exc)
+        task.error = f"{type(exc).__name__}: {exc}"
         task.finished_at = datetime.now(timezone.utc)
         await on_event(WSEvent(
             task_id=task_id,
             event="task_done",
-            data={"status": "failed", "error": str(exc)},
+            data={"status": "failed", "error": task.error},
         ))
 
     finally:
@@ -327,7 +310,9 @@ def _build_trace(
         }
     """
     steps_trace: list[dict[str, Any]] = []
+    total_cost = 0.0
     for step in plan.steps:
+        total_cost += step.cost_usd
         entry: dict[str, Any] = {
             "id": step.id,
             "action": step.action,
@@ -348,6 +333,6 @@ def _build_trace(
     return {
         "planning_ms": plan_ms,
         "execution_ms": exec_ms,
-        "total_cost_usd": round(sum(s.cost_usd for s in plan.steps), 6),
+        "total_cost_usd": round(total_cost, 6),
         "steps": steps_trace,
     }

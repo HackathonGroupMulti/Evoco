@@ -46,25 +46,16 @@ def parse_result(raw: Any, parsed: Any = None) -> Any:
         pass
 
     # Strategy 3: Regex extraction — find JSON array or object in mixed text
-    # Try array first
-    array_match = re.search(r"\[[\s\S]*\]", text)
-    if array_match:
-        try:
-            result = json.loads(array_match.group())
-            logger.debug("Parse strategy 3 (regex array): success")
-            return result
-        except json.JSONDecodeError:
-            pass
-
-    # Try object
-    obj_match = re.search(r"\{[\s\S]*\}", text)
-    if obj_match:
-        try:
-            result = json.loads(obj_match.group())
-            logger.debug("Parse strategy 3 (regex object): success")
-            return result
-        except json.JSONDecodeError:
-            pass
+    # Non-greedy to avoid matching far-apart brackets in large text
+    for label, pattern in (("array", r"\[[\s\S]*?\]"), ("object", r"\{[\s\S]*?\}")):
+        match = re.search(pattern, text)
+        if match:
+            try:
+                result = json.loads(match.group())
+                logger.debug("Parse strategy 3 (regex %s): success", label)
+                return result
+            except json.JSONDecodeError:
+                pass
 
     # Strategy 4: LLM repair (deferred — calls back to Bedrock)
     try:
@@ -87,15 +78,9 @@ def _llm_repair(malformed: str) -> Any:
     if not settings.has_aws_credentials:
         return None
 
-    import boto3
+    from backend.services.planner import _build_bedrock_client
 
-    client = boto3.client(
-        "bedrock-runtime",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-    )
-
+    client = _build_bedrock_client()
     prompt = (
         "The following text was supposed to be valid JSON but is malformed. "
         "Extract the data and return ONLY valid JSON. No explanation.\n\n"
@@ -119,7 +104,7 @@ def _llm_repair(malformed: str) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"[\[{][\s\S]*[\]}]", text)
+        match = re.search(r"[\[{][\s\S]*?[\]}]", text)
         if match:
             return json.loads(match.group())
     return None

@@ -7,6 +7,7 @@ import { LandingHero } from "@/components/LandingHero";
 import { ThinkingOverlay } from "@/components/ThinkingOverlay";
 import { WaterfallView } from "@/components/WaterfallView";
 import { VoiceOrb } from "@/components/VoiceOrb";
+import { LogPanel } from "@/components/LogPanel";
 import { useTaskRunner } from "@/hooks/useTaskRunner";
 import type { HealthResponse, OutputFormat, TaskResult } from "@/types";
 
@@ -18,6 +19,7 @@ export default function App() {
   const [mode, setMode] = useState<"live" | "mock" | "unknown">("unknown");
   const [hasStarted, setHasStarted] = useState(false);
   const [showWaterfall, setShowWaterfall] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
 
   useEffect(() => {
     fetch("/api/health")
@@ -124,6 +126,18 @@ export default function App() {
           </div>
         )}
 
+        {/* Logs toggle */}
+        <button
+          onClick={() => setShowLogs((v) => !v)}
+          className={`relative rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+            showLogs
+              ? "bg-gradient-to-r from-neon-amber/20 to-neon-rose/20 text-neon-amber"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Logs
+        </button>
+
         {/* Shimmer line */}
         <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-neon-cyan/40 to-transparent" />
       </header>
@@ -157,6 +171,13 @@ export default function App() {
           <ResultsPanel result={displayResult} connectionState={connectionState} />
         </div>
       </main>
+
+      {/* Log drawer */}
+      {showLogs && (
+        <div className="shrink-0 h-56 border-t border-border/30 px-3 pb-1">
+          <LogPanel />
+        </div>
+      )}
 
       {/* Status Bar */}
       <StatusBar

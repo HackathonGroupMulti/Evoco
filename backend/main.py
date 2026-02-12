@@ -8,12 +8,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
-from backend.routers import tasks, voice, ws
+from backend.routers import logs, tasks, voice, ws
+from backend.services import log_store
 
 logging.basicConfig(
     level=logging.DEBUG if settings.is_dev else logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
 )
+log_store.install()
 
 app = FastAPI(
     title="Evoco Control Panel",
@@ -34,9 +36,10 @@ app.add_middleware(
 app.include_router(tasks.router)
 app.include_router(voice.router)
 app.include_router(ws.router)
+app.include_router(logs.router)
 
 
-@app.get("/health")
+@app.get("/api/health")
 async def health() -> dict:
     return {
         "status": "ok",

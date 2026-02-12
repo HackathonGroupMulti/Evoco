@@ -121,6 +121,8 @@ class DAGExecutor:
         """
         task_id = self.plan.task_id
         running: dict[str, asyncio.Task] = {}
+        # Reverse lookup: asyncio.Task → step_id (O(1) on exception)
+        task_to_step: dict[asyncio.Task, str] = {}
 
         while True:
             ready = self._get_ready_steps()
@@ -131,7 +133,9 @@ class DAGExecutor:
                     step.id, step.action, step.group,
                 )
                 coro = self._run_step(step)
-                running[step.id] = asyncio.create_task(coro)
+                t = asyncio.create_task(coro)
+                running[step.id] = t
+                task_to_step[t] = step.id
 
             if not running:
                 break
@@ -141,9 +145,20 @@ class DAGExecutor:
             )
 
             for finished_task in done:
-                step_id, result = finished_task.result()
+                try:
+                    step_id, result = finished_task.result()
+                except Exception as exc:
+                    step_id = task_to_step.get(finished_task)
+                    if step_id is None:
+                        continue
+                    result = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+                    logger.exception(
+                        "DAG: step %s raised unhandled exception", step_id,
+                    )
+
                 step = self._steps[step_id]
                 del running[step_id]
+                del task_to_step[finished_task]
 
                 if result.get("success"):
                     step.mark_completed(result)
@@ -158,11 +173,12 @@ class DAGExecutor:
                         data={"step_id": step_id, "result": result},
                     ))
                 else:
-                    step.mark_failed(result.get("error", "unknown error"))
+                    err_msg = result.get("error", "unknown error")
+                    step.mark_failed(err_msg)
                     self._failed_ids.add(step_id)
-                    logger.warning(
-                        "DAG: step %s (%s) failed: %s",
-                        step_id, step.action, step.error,
+                    logger.error(
+                        "DAG: step %s (%s → %s) FAILED: %s",
+                        step_id, step.action, step.target, err_msg,
                     )
                     await self.on_event(WSEvent(
                         task_id=task_id,

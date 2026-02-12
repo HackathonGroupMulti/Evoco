@@ -4,128 +4,172 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 from typing import Any
 
 from backend.models.task import OutputFormat, TaskPlan
 
 
+def _is_product(item: Any) -> bool:
+    """Check if a dict looks like a product entry (has at least a name)."""
+    return isinstance(item, dict) and "name" in item
+
+
+def _add_products(
+    items: list[dict], products: list[dict[str, Any]], seen: set[str],
+) -> None:
+    """Dedupe and append product dicts."""
+    for item in items:
+        if not _is_product(item):
+            continue
+        ident = f"{item.get('name', '')}-{item.get('source', '')}"
+        if ident not in seen:
+            seen.add(ident)
+            products.append(item)
+
+
 def _collect_products(plan: TaskPlan) -> list[dict[str, Any]]:
-    """Pull all product dicts from extract / compare / search step results."""
+    """Pull all product dicts from step results.
+
+    Handles three result shapes:
+      - Top-level keys: data["extracted"], data["products"], data["ranked"]
+      - data["response"] is a list of products (browser extract steps)
+      - data["response"] is a dict with nested "ranked"/"products"/"extracted"
+    """
     products: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     for step in plan.steps:
-        if step.result is None:
+        if step.result is None or not isinstance(step.result, dict):
             continue
-        data = step.result if isinstance(step.result, dict) else {}
+        data = step.result
 
+        # Check top-level keys
         for key in ("extracted", "products", "ranked"):
-            for item in data.get(key, []):
-                ident = f"{item.get('name', '')}-{item.get('source', '')}"
-                if ident not in seen:
-                    seen.add(ident)
-                    products.append(item)
+            items = data.get(key)
+            if isinstance(items, list):
+                _add_products(items, products, seen)
+
+        # Check inside "response" — browser steps put parsed data here,
+        # LLM steps put a dict with nested keys here
+        response = data.get("response")
+        if isinstance(response, list):
+            _add_products(response, products, seen)
+        elif isinstance(response, dict):
+            for key in ("extracted", "products", "ranked"):
+                items = response.get(key)
+                if isinstance(items, list):
+                    _add_products(items, products, seen)
 
     return products
 
 
-def _collect_responses(plan: TaskPlan) -> list[dict[str, str]]:
-    """Pull text responses from Nova Act step results."""
-    responses: list[dict[str, str]] = []
-    for step in plan.steps:
-        if step.result is None or not isinstance(step.result, dict):
+def _get_summary_text(plan: TaskPlan) -> str | None:
+    """Extract summary text from the last summarize step (single reverse scan).
+
+    Handles:
+      - step.result["summary"] (top-level)
+      - step.result["response"]["summary"] (LLM executor nesting)
+      - step.result["response"] as a string
+    """
+    for s in reversed(plan.steps):
+        if s.action != "summarize" or not s.result or not isinstance(s.result, dict):
             continue
-        response = step.result.get("response")
-        if response:
-            responses.append({
-                "action": step.action,
-                "description": step.description,
-                "response": response.strip('"') if isinstance(response, str) else str(response),
-            })
-    return responses
+
+        # Direct top-level summary
+        text = s.result.get("summary")
+        if text:
+            return _stringify(text)
+
+        # Nested inside "response" (LLM executor pattern)
+        response = s.result.get("response")
+        if isinstance(response, dict):
+            text = response.get("summary")
+            if text:
+                return _stringify(text)
+            # Fallback: recommendation field
+            text = response.get("recommendation")
+            if text:
+                return _stringify(text)
+        elif isinstance(response, str):
+            return response.strip('"')
+        elif isinstance(response, list):
+            # List of sentences
+            return " ".join(str(s) for s in response)
+
+    return None
+
+
+def _stringify(val: Any) -> str:
+    """Convert a value to a clean display string."""
+    if isinstance(val, str):
+        return val.strip('"')
+    if isinstance(val, list):
+        return " ".join(str(s) for s in val)
+    return str(val)
+
+
+_PRODUCT_SORT_KEY = lambda p: (-p.get("rating", 0), p.get("price", 0))
 
 
 def format_output(plan: TaskPlan, fmt: OutputFormat) -> Any:
     """Return the final formatted output for the task."""
     products = _collect_products(plan)
-    responses = _collect_responses(plan)
+    summary = _get_summary_text(plan)
+
+    # Sort once — O(n log n) — reused by all formatters
+    sorted_products = sorted(products, key=_PRODUCT_SORT_KEY) if products else []
 
     if fmt == OutputFormat.JSON:
-        return _as_json(plan, products, responses)
+        return _as_json(plan, sorted_products, summary)
     if fmt == OutputFormat.CSV:
-        return _as_csv(products, responses)
-    return _as_summary(plan, products, responses)
+        return _as_csv(sorted_products)
+    return _as_summary(plan, sorted_products, summary)
 
 
-def _as_json(plan: TaskPlan, products: list[dict], responses: list[dict]) -> dict[str, Any]:
-    summary_step = next((s for s in reversed(plan.steps) if s.action == "summarize"), None)
-    summary = None
-    if summary_step and summary_step.result:
-        summary = summary_step.result.get("summary") or summary_step.result.get("response", "")
-        if isinstance(summary, str):
-            summary = summary.strip('"')
-
-    if products:
-        sorted_products = sorted(products, key=lambda p: (-p.get("rating", 0), p.get("price", 0)))
-        return {
-            "command": plan.original_command,
-            "total_results": len(sorted_products),
-            "results": sorted_products,
-            "summary": summary,
-        }
-
+def _as_json(
+    plan: TaskPlan, products: list[dict], summary: str | None,
+) -> dict[str, Any]:
     return {
         "command": plan.original_command,
-        "total_results": len(responses),
-        "steps": responses,
+        "total_results": len(products),
+        "results": products,
         "summary": summary,
     }
 
 
-def _as_csv(products: list[dict], responses: list[dict]) -> str:
-    if products:
-        buf = io.StringIO()
-        fields = ["name", "price", "rating", "source"]
-        writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        for p in sorted(products, key=lambda p: (-p.get("rating", 0), p.get("price", 0))):
-            writer.writerow(p)
-        return buf.getvalue()
-
-    if responses:
-        buf = io.StringIO()
-        fields = ["action", "description", "response"]
-        writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        for r in responses:
-            writer.writerow(r)
-        return buf.getvalue()
-
-    return "No results found."
+def _as_csv(products: list[dict]) -> str:
+    if not products:
+        return "No results found."
+    buf = io.StringIO()
+    writer = csv.DictWriter(
+        buf, fieldnames=["name", "price", "rating", "source"], extrasaction="ignore",
+    )
+    writer.writeheader()
+    writer.writerows(products)
+    return buf.getvalue()
 
 
-def _as_summary(plan: TaskPlan, products: list[dict], responses: list[dict]) -> str:
+def _as_summary(
+    plan: TaskPlan, products: list[dict], summary: str | None,
+) -> str:
     lines: list[str] = [f"Results for: {plan.original_command}", ""]
 
     if products:
-        sorted_products = sorted(products, key=lambda p: (-p.get("rating", 0), p.get("price", 0)))
-        for i, p in enumerate(sorted_products[:10], 1):
+        for i, p in enumerate(products[:10], 1):
+            price = p.get("price")
+            rating = p.get("rating")
+            price_str = f"${price}" if price else "N/A"
+            rating_str = f"{rating} stars" if rating else "unrated"
             lines.append(
-                f"{i}. {p.get('name', 'Unknown')} — ${p.get('price', '?')} "
-                f"({p.get('rating', '?')} stars) from {p.get('source', 'unknown')}"
+                f"{i}. {p.get('name', 'Unknown')} — {price_str} "
+                f"({rating_str}) from {p.get('source', 'unknown')}"
             )
-    elif responses:
-        for r in responses:
-            lines.append(f"[{r['action']}] {r['response']}")
+    elif summary:
+        pass  # summary-only output below
     else:
         return "No results were found for your query."
 
-    summary_step = next((s for s in reversed(plan.steps) if s.action == "summarize"), None)
-    if summary_step and summary_step.result:
-        summary = summary_step.result.get("summary") or summary_step.result.get("response", "")
-        if isinstance(summary, str):
-            summary = summary.strip('"')
+    if summary:
         lines.append("")
         lines.append(summary)
 

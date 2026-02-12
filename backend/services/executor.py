@@ -10,6 +10,7 @@ import asyncio
 import logging
 import random
 from typing import Any
+from urllib.parse import quote_plus
 
 from backend.config import settings
 from backend.models.task import ExecutorType, TaskStep
@@ -24,19 +25,87 @@ logger = logging.getLogger(__name__)
 # Nova Act integration (browser)
 # ---------------------------------------------------------------------------
 
+# Direct search URL patterns for known sites — bypasses popups, overlays,
+# and bot detection that block Nova Act from using the site search UI.
+_SEARCH_URL_PATTERNS: dict[str, str] = {
+    "amazon.com": "https://www.amazon.com/s?k={q}",
+    "bestbuy.com": "https://www.bestbuy.com/site/searchpage.jsp?st={q}",
+    "newegg.com": "https://www.newegg.com/p/pl?d={q}",
+    "walmart.com": "https://www.walmart.com/search?q={q}",
+    "ebay.com": "https://www.ebay.com/sch/i.html?_nkw={q}",
+    "target.com": "https://www.target.com/s?searchTerm={q}",
+}
+
+
+def _extract_search_query(step: TaskStep) -> str:
+    """Pull the raw search terms out of the planner description."""
+    desc = step.description
+    target = step.target.replace("https://www.", "").replace("http://www.", "").rstrip("/")
+    # Remove common planner wrappers
+    for prefix in ("Search for ", "Search "):
+        if desc.startswith(prefix):
+            desc = desc[len(prefix):]
+            break
+    for suffix in (f" on {target}", f" on {step.target}"):
+        if desc.lower().endswith(suffix.lower()):
+            desc = desc[: -len(suffix)]
+            break
+    return desc.strip()
+
+
+def _search_url_for(target: str, query: str) -> str | None:
+    """Return a direct search URL if the site is known, else None."""
+    domain = target.replace("https://www.", "").replace("http://www.", "").rstrip("/")
+    pattern = _SEARCH_URL_PATTERNS.get(domain)
+    if pattern:
+        return pattern.format(q=quote_plus(query))
+    return None
+
+
+def _build_browser_prompt(step: TaskStep) -> str:
+    """Build a short, focused prompt for the Nova Act browser agent.
+
+    For search actions on known e-commerce sites, we navigate directly to the
+    search results URL — this is far more reliable than having the browser
+    agent fight through popups and overlays to find the search bar.
+    """
+    action = step.action
+
+    if action == "navigate":
+        return f"Go to {step.target}"
+    if action == "search":
+        query = _extract_search_query(step)
+        url = _search_url_for(step.target, query)
+        if url:
+            # Skip the UI entirely — go straight to results
+            return f"Go to {url}"
+        # Unknown site — fall back to using the site search
+        return f"Use the site search to find: {query}"
+    if action == "extract":
+        return "Extract the product names, prices, and ratings visible on this page"
+    # Generic fallback
+    return step.description
+
+
+# Errors that should NOT be retried (they will fail again the same way)
+_NO_RETRY_PATTERNS = ("ExceededMaxSteps", "ActExceededMaxSteps")
+
+
 async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, Any]:
     """Execute a single step using the Nova Act SDK."""
     from nova_act import NovaAct  # type: ignore[import-untyped]
 
-    extract_actions = {"search", "extract"}
     schema = schema_for_action(step.action)
+    prompt = _build_browser_prompt(step)
+
+    logger.info("Nova Act prompt for step %s: %s", step.id, prompt)
 
     def _run() -> dict[str, Any]:
         # Use pool session if available, otherwise create new
         if pool is not None:
             nova = pool.get_session(step.target)
             if nova is not None:
-                return _run_in_session(nova, step, extract_actions, schema)
+                return _run_in_session(nova, step, prompt, schema)
 
         with NovaAct(
             nova_act_api_key=settings.nova_act_api_key,
@@ -44,44 +113,29 @@ async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, 
             headless=settings.headless_browser,
             tty=False,
         ) as nova:
-            return _run_in_session(nova, step, extract_actions, schema)
+            return _run_in_session(nova, step, prompt, schema)
 
     return await asyncio.to_thread(_run)
 
 
+_EXTRACT_ACTIONS = frozenset({"extract"})
+
+
 def _run_in_session(
-    nova: Any, step: TaskStep, extract_actions: set, schema: dict | None
+    nova: Any, step: TaskStep, prompt: str, schema: dict | None,
 ) -> dict[str, Any]:
     """Execute a step within an existing Nova Act session."""
-    if step.action in extract_actions and schema:
-        result = nova.act_get(step.description, schema=schema)
-        parsed = parse_result(result.response, getattr(result, "parsed_response", None))
-        return {
-            "success": True,
-            "response": parsed,
-            "url": step.target,
-            "cost_usd": estimate_browser_cost(),
-            "executor": "browser",
-        }
-    elif step.action in extract_actions:
-        result = nova.act_get(step.description)
-        parsed = parse_result(result.response)
-        return {
-            "success": True,
-            "response": parsed,
-            "url": step.target,
-            "cost_usd": estimate_browser_cost(),
-            "executor": "browser",
-        }
+    out: dict[str, Any] = {"success": True, "url": step.target,
+                           "cost_usd": estimate_browser_cost(), "executor": "browser"}
+
+    if step.action in _EXTRACT_ACTIONS:
+        result = nova.act_get(prompt, schema=schema) if schema else nova.act_get(prompt)
+        out["response"] = parse_result(result.response, getattr(result, "parsed_response", None))
     else:
-        result = nova.act(step.description)
-        return {
-            "success": True,
-            "url": step.target,
-            "steps_taken": result.metadata.num_steps_executed,
-            "cost_usd": estimate_browser_cost(),
-            "executor": "browser",
-        }
+        result = nova.act(prompt)
+        out["steps_taken"] = result.metadata.num_steps_executed
+
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +241,18 @@ async def execute_step(
         except Exception as exc:
             last_error = exc
             step.retries = attempt + 1
+
+            # Some errors are deterministic — retrying won't help
+            exc_name = type(exc).__name__
+            no_retry = any(pat in exc_name for pat in _NO_RETRY_PATTERNS)
+
+            if no_retry:
+                logger.error(
+                    "Step %s (%s → %s) FAILED (non-retryable %s): %s",
+                    step.id, step.action, step.target, exc_name, exc,
+                )
+                break
+
             if attempt < step.max_retries:
                 wait = 2 ** attempt
                 logger.warning(
@@ -195,6 +261,11 @@ async def execute_step(
                 )
                 await asyncio.sleep(wait)
             else:
-                logger.error("Step %s failed after %d attempts: %s", step.id, attempt + 1, exc)
+                logger.error(
+                    "Step %s (%s → %s) FAILED after %d attempts: %s: %s",
+                    step.id, step.action, step.target,
+                    attempt + 1, type(exc).__name__, exc,
+                    exc_info=True,
+                )
 
-    return {"success": False, "error": str(last_error)}
+    return {"success": False, "error": f"{type(last_error).__name__}: {last_error}"}

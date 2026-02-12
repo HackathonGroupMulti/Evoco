@@ -35,24 +35,31 @@ Steps that can run in parallel should NOT depend on each other.
 For example, searching Amazon and searching Best Buy are independent and can run in parallel.
 Only add a dependency when a step truly needs the output of a prior step.
 
+IMPORTANT — description rules for browser steps:
+  - Keep descriptions SHORT (under 10 words). They drive a browser automation agent.
+  - For "search" actions: only state WHAT to search for. Example: "espresso machines under $500"
+  - For "extract" actions: just say "Extract product results"
+  - For "navigate" actions: just say "Open <site name>"
+  - NEVER include JSON, schemas, formatting instructions, or site names in search descriptions.
+
 Reply ONLY with a JSON array. Each element must have:
   - "action": the type of action (e.g. "navigate", "search", "extract", "compare", "summarize")
-  - "target": URL or site name (use "aggregated" for LLM steps that process collected data)
-  - "description": short human-readable description of what this step does
+  - "target": full URL (use "aggregated" for LLM steps that process collected data)
+  - "description": short action-only instruction (see rules above)
   - "executor": "browser" or "llm"
-  - "group": a short label for the branch (e.g. "amazon", "bestbuy", "analysis"). Steps in the same group are sequential. Steps in different groups can run in parallel.
-  - "depends_on": array of step indices (0-based) that must complete before this step runs. Leave empty [] for steps with no dependencies. For LLM analysis steps, depend on all extract steps.
+  - "group": a short label for the branch (e.g. "amazon", "bestbuy", "analysis")
+  - "depends_on": array of step indices (0-based) that must complete first. Empty [] for no deps.
 
 Example for "compare laptops on Amazon and Best Buy":
 [
   {"action": "navigate", "target": "https://www.amazon.com", "description": "Open Amazon", "executor": "browser", "group": "amazon", "depends_on": []},
-  {"action": "search", "target": "https://www.amazon.com", "description": "Search for laptops on Amazon", "executor": "browser", "group": "amazon", "depends_on": [0]},
-  {"action": "extract", "target": "https://www.amazon.com", "description": "Extract top results from Amazon", "executor": "browser", "group": "amazon", "depends_on": [1]},
+  {"action": "search", "target": "https://www.amazon.com", "description": "laptops under $800", "executor": "browser", "group": "amazon", "depends_on": [0]},
+  {"action": "extract", "target": "https://www.amazon.com", "description": "Extract product results", "executor": "browser", "group": "amazon", "depends_on": [1]},
   {"action": "navigate", "target": "https://www.bestbuy.com", "description": "Open Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": []},
-  {"action": "search", "target": "https://www.bestbuy.com", "description": "Search for laptops on Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": [3]},
-  {"action": "extract", "target": "https://www.bestbuy.com", "description": "Extract top results from Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": [4]},
-  {"action": "compare", "target": "aggregated", "description": "Compare results across sites and rank by value", "executor": "llm", "group": "analysis", "depends_on": [2, 5]},
-  {"action": "summarize", "target": "aggregated", "description": "Produce final summary with recommendations", "executor": "llm", "group": "analysis", "depends_on": [6]}
+  {"action": "search", "target": "https://www.bestbuy.com", "description": "laptops under $800", "executor": "browser", "group": "bestbuy", "depends_on": [3]},
+  {"action": "extract", "target": "https://www.bestbuy.com", "description": "Extract product results", "executor": "browser", "group": "bestbuy", "depends_on": [4]},
+  {"action": "compare", "target": "aggregated", "description": "Compare and rank by value", "executor": "llm", "group": "analysis", "depends_on": [2, 5]},
+  {"action": "summarize", "target": "aggregated", "description": "Final summary with recommendations", "executor": "llm", "group": "analysis", "depends_on": [6]}
 ]
 
 Do NOT include any text outside the JSON array.
@@ -68,13 +75,13 @@ def _build_bedrock_client() -> Any:
     )
 
 
-def _call_nova(command: str) -> list[dict]:
-    """Invoke Nova 2 Lite and parse the JSON step list."""
+def _invoke_nova(user_text: str, temperature: float = 0.2) -> list[dict]:
+    """Call Nova 2 Lite and parse the JSON step list from the response."""
     client = _build_bedrock_client()
     body = {
-        "messages": [{"role": "user", "content": [{"text": command}]}],
+        "messages": [{"role": "user", "content": [{"text": user_text}]}],
         "system": [{"text": SYSTEM_PROMPT}],
-        "inferenceConfig": {"maxTokens": 2048, "temperature": 0.2},
+        "inferenceConfig": {"maxTokens": 2048, "temperature": temperature},
     }
     response = client.invoke_model(
         modelId=NOVA_MODEL_ID,
@@ -85,7 +92,6 @@ def _call_nova(command: str) -> list[dict]:
     result = json.loads(response["body"].read())
     text = result["output"]["message"]["content"][0]["text"]
 
-    # Try parsing directly, then try extracting JSON from text
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -95,9 +101,13 @@ def _call_nova(command: str) -> list[dict]:
         raise
 
 
+def _call_nova(command: str) -> list[dict]:
+    """Invoke Nova 2 Lite and parse the JSON step list."""
+    return _invoke_nova(command, temperature=0.2)
+
+
 def _call_nova_replan(command: str, failed_steps: list[dict], context: list[dict]) -> list[dict]:
     """Ask Nova 2 Lite for an alternative plan after failures."""
-    client = _build_bedrock_client()
     replan_prompt = (
         f"Original command: {command}\n\n"
         f"These steps failed:\n{json.dumps(failed_steps, indent=2)}\n\n"
@@ -105,26 +115,7 @@ def _call_nova_replan(command: str, failed_steps: list[dict], context: list[dict
         "Generate an alternative plan to accomplish the original command. "
         "Try different sites or approaches. Reply ONLY with a JSON array."
     )
-    body = {
-        "messages": [{"role": "user", "content": [{"text": replan_prompt}]}],
-        "system": [{"text": SYSTEM_PROMPT}],
-        "inferenceConfig": {"maxTokens": 2048, "temperature": 0.3},
-    }
-    response = client.invoke_model(
-        modelId=NOVA_MODEL_ID,
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps(body),
-    )
-    result = json.loads(response["body"].read())
-    text = result["output"]["message"]["content"][0]["text"]
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\[.*\]", text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise
+    return _invoke_nova(replan_prompt, temperature=0.3)
 
 
 def _mock_plan(command: str) -> list[dict]:
@@ -153,21 +144,34 @@ def _mock_plan(command: str) -> list[dict]:
     steps: list[dict] = []
     extract_indices: list[int] = []
 
+    # Extract a short search query from the user command
+    # Strip site names and filler words to get the core search intent
+    search_query = cmd
+    for kw in ["amazon", "best buy", "newegg", "walmart", "ebay",
+               "linkedin", "indeed", "zillow", "yelp",
+               "find me", "compare", "search for", "look for", "find",
+               "from", " on ", " and "]:
+        search_query = search_query.replace(kw, " ")
+    search_query = " ".join(search_query.split()).strip()
+    if not search_query:
+        search_query = command  # fallback to original
+
     for url, group in sites:
         base_idx = len(steps)
+        site_name = group.replace("bestbuy", "Best Buy").title()
         steps.append({
             "action": "navigate", "target": url,
-            "description": f"Open {url}",
+            "description": f"Open {site_name}",
             "executor": "browser", "group": group, "depends_on": [],
         })
         steps.append({
             "action": "search", "target": url,
-            "description": f"Search for the requested information on {url}",
+            "description": search_query,
             "executor": "browser", "group": group, "depends_on": [base_idx],
         })
         steps.append({
             "action": "extract", "target": url,
-            "description": f"Extract top results from {url}",
+            "description": "Extract product results",
             "executor": "browser", "group": group, "depends_on": [base_idx + 1],
         })
         extract_indices.append(base_idx + 2)

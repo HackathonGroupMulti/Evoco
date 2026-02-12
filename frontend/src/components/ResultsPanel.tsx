@@ -119,6 +119,13 @@ function ResultContent({ result }: { result: TaskResult }) {
   );
 }
 
+function formatSummary(raw: unknown): string | null {
+  if (!raw) return null;
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw.join(" ");
+  return String(raw);
+}
+
 function FormattedOutput({ result }: { result: TaskResult }) {
   const output = result.output as Record<string, unknown> | string | null;
 
@@ -126,7 +133,7 @@ function FormattedOutput({ result }: { result: TaskResult }) {
     return (
       <div className="flex flex-col gap-3 pr-3">
         <div className="rounded-lg bg-gradient-to-br from-neon-cyan/[0.08] to-neon-purple/[0.06] border border-neon-cyan/20 p-4 glow-cyan">
-          <p className="text-sm text-foreground leading-relaxed">{output}</p>
+          <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{output}</p>
         </div>
       </div>
     );
@@ -137,15 +144,17 @@ function FormattedOutput({ result }: { result: TaskResult }) {
   }
 
   const products = (output.results ?? output.ranked ?? []) as Array<{
-    name: string;
-    price: number;
-    rating: number;
-    source: string;
+    name?: string;
+    price?: number;
+    rating?: number;
+    source?: string;
     url?: string;
   }>;
 
-  const summary = output.summary as string | undefined;
-  const topPick = products[0];
+  const summary = formatSummary(output.summary);
+  const validProducts = products.filter((p) => p.name);
+  const topPick = validProducts[0];
+  const maxPrice = Math.max(...validProducts.map((p) => p.price ?? 0), 1);
 
   return (
     <div className="flex flex-col gap-3 pr-3">
@@ -153,7 +162,7 @@ function FormattedOutput({ result }: { result: TaskResult }) {
       {summary && (
         <div className="rounded-lg bg-gradient-to-br from-neon-cyan/[0.08] to-neon-purple/[0.06] border border-neon-cyan/20 p-4 glow-cyan">
           <div className="flex items-start gap-2.5">
-            <span className="text-base mt-0.5">{"\u{1F4AC}"}</span>
+            <span className="text-base mt-0.5 shrink-0">{"\u{1F4AC}"}</span>
             <p className="text-sm text-foreground leading-relaxed">{summary}</p>
           </div>
         </div>
@@ -167,14 +176,18 @@ function FormattedOutput({ result }: { result: TaskResult }) {
               <Badge className="bg-neon-emerald/20 text-neon-emerald border-neon-emerald/30 text-[10px] font-bold">
                 {"\u{1F3C6}"} TOP PICK
               </Badge>
-              <span className="text-[10px] text-muted-foreground/50">{topPick.source}</span>
+              {topPick.source && (
+                <span className="text-[10px] text-muted-foreground/50">{topPick.source}</span>
+              )}
             </div>
             <p className="text-sm font-semibold text-foreground mb-2">{topPick.name}</p>
             <div className="flex items-center gap-3">
-              <span className="text-xl font-bold bg-gradient-to-r from-neon-emerald to-neon-cyan bg-clip-text text-transparent">
-                ${topPick.price}
-              </span>
-              {topPick.rating > 0 && (
+              {topPick.price != null && (
+                <span className="text-xl font-bold bg-gradient-to-r from-neon-emerald to-neon-cyan bg-clip-text text-transparent">
+                  ${topPick.price}
+                </span>
+              )}
+              {topPick.rating != null && topPick.rating > 0 && (
                 <div className="flex items-center gap-1">
                   <StarRating rating={topPick.rating} />
                   <span className="text-xs text-neon-amber font-medium">{topPick.rating}</span>
@@ -186,14 +199,14 @@ function FormattedOutput({ result }: { result: TaskResult }) {
       )}
 
       {/* Price comparison bar chart for remaining products */}
-      {products.length > 1 && (
+      {validProducts.length > 1 && (
         <div className="flex flex-col gap-1.5">
           <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground/50 mb-1">
             All Results
           </p>
-          {products.slice(1).map((p, i) => {
-            const maxPrice = Math.max(...products.map((pr) => pr.price));
-            const barWidth = maxPrice > 0 ? (p.price / maxPrice) * 100 : 50;
+          {validProducts.slice(1).map((p, i) => {
+            const price = p.price ?? 0;
+            const barWidth = maxPrice > 0 ? (price / maxPrice) * 100 : 50;
 
             return (
               <div
@@ -211,8 +224,10 @@ function FormattedOutput({ result }: { result: TaskResult }) {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-bold text-foreground">${p.price}</span>
-                    {p.rating > 0 && (
+                    {price > 0 && (
+                      <span className="text-sm font-bold text-foreground">${price}</span>
+                    )}
+                    {p.rating != null && p.rating > 0 && (
                       <Badge
                         variant="secondary"
                         className="text-[9px] bg-neon-amber/10 text-neon-amber border-neon-amber/20 px-1.5"
@@ -223,13 +238,17 @@ function FormattedOutput({ result }: { result: TaskResult }) {
                   </div>
                 </div>
                 {/* Price bar */}
-                <div className="h-1 rounded-full bg-secondary/30 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-neon-cyan/40 to-neon-purple/40 transition-all duration-500"
-                    style={{ width: `${barWidth}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground/40 mt-1">{p.source}</p>
+                {price > 0 && (
+                  <div className="h-1 rounded-full bg-secondary/30 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-neon-cyan/40 to-neon-purple/40 transition-all duration-500"
+                      style={{ width: `${barWidth}%` }}
+                    />
+                  </div>
+                )}
+                {p.source && (
+                  <p className="text-[10px] text-muted-foreground/40 mt-1">{p.source}</p>
+                )}
               </div>
             );
           })}
@@ -237,7 +256,7 @@ function FormattedOutput({ result }: { result: TaskResult }) {
       )}
 
       {/* Fallback if no structured data */}
-      {products.length === 0 && !summary && (
+      {validProducts.length === 0 && !summary && (
         <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground">
           {JSON.stringify(output, null, 2)}
         </pre>
