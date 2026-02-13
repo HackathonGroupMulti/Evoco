@@ -72,7 +72,10 @@ def install() -> None:
     try:
         _event_loop = asyncio.get_running_loop()
     except RuntimeError:
-        _event_loop = asyncio.get_event_loop()
+        # No running loop (e.g. during module import or test collection).
+        # The event loop will be captured later when logging happens inside
+        # an async context.
+        _event_loop = None
     root = logging.getLogger()
     if _handler not in root.handlers:
         root.addHandler(_handler)

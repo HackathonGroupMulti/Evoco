@@ -25,6 +25,7 @@ from backend.models.task import (
     WSEvent,
 )
 from backend.services.executor import execute_step
+from backend.telemetry import trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ class DAGExecutor:
         return context
 
     async def _run_step(self, step: TaskStep) -> tuple[str, dict[str, Any]]:
-        """Execute a single step, emitting WS events."""
+        """Execute a single step, emitting WS events and tracing spans."""
         step.mark_running()
         await self.on_event(WSEvent(
             task_id=self.plan.task_id,
@@ -116,9 +117,21 @@ class DAGExecutor:
             },
         ))
 
-        context = self._collect_context_for(step)
-        result = await execute_step(step, context=context, pool=self.pool)
-        return step.id, result
+        with trace_span(
+            f"dag.step.{step.action}",
+            attributes={
+                "step.id": step.id,
+                "step.action": step.action,
+                "step.group": step.group,
+                "step.executor": step.executor.value,
+                "step.target": step.target,
+                "task.id": self.plan.task_id,
+            },
+        ) as span:
+            context = self._collect_context_for(step)
+            result = await execute_step(step, context=context, pool=self.pool)
+            span.set_attribute("step.success", result.get("success", False))
+            return step.id, result
 
     async def execute(self) -> dict[str, Any]:
         """Run the full DAG and return an execution summary.

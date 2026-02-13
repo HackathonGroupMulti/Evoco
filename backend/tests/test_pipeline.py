@@ -2,10 +2,18 @@
 
 import pytest
 
+from backend.config import settings
 from backend.models.task import OutputFormat, TaskStatus, WSEvent
 from backend.orchestrator.pipeline import run_task
 
+# Pipeline tests call real AWS/Nova Act in live mode — skip to avoid minutes-long waits
+_skip_live = pytest.mark.skipif(
+    settings.has_aws_credentials,
+    reason="Skipped in live mode — requires real browser automation",
+)
 
+
+@_skip_live
 @pytest.mark.asyncio
 async def test_full_pipeline_json() -> None:
     """Run the complete pipeline (mock mode) and verify the result."""
@@ -19,6 +27,7 @@ async def test_full_pipeline_json() -> None:
     assert result.duration_ms is not None and result.duration_ms > 0
 
 
+@_skip_live
 @pytest.mark.asyncio
 async def test_full_pipeline_csv() -> None:
     result = await run_task(
@@ -30,6 +39,7 @@ async def test_full_pipeline_csv() -> None:
     assert "name,price,rating,source" in result.output
 
 
+@_skip_live
 @pytest.mark.asyncio
 async def test_full_pipeline_summary() -> None:
     result = await run_task(
@@ -41,6 +51,7 @@ async def test_full_pipeline_summary() -> None:
     assert "Results for:" in result.output
 
 
+@_skip_live
 @pytest.mark.asyncio
 async def test_ws_events_are_emitted() -> None:
     """Verify the pipeline emits the expected WebSocket events."""

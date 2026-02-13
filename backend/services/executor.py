@@ -14,6 +14,11 @@ from urllib.parse import quote_plus
 
 from backend.config import settings
 from backend.models.task import ExecutorType, TaskStep
+from backend.services.circuit_breaker import (
+    CircuitOpenError,
+    bedrock_breaker,
+    nova_act_breaker,
+)
 from backend.services.cost import estimate_browser_cost
 from backend.services.result_parser import parse_result
 from backend.services.schemas import schema_for_action
@@ -224,14 +229,16 @@ async def execute_step(
             if step.executor == ExecutorType.LLM:
                 # LLM steps — reasoning over collected data
                 if settings.has_aws_credentials:
-                    result = await execute_with_llm(step, context)
+                    async with bedrock_breaker:
+                        result = await execute_with_llm(step, context)
                 else:
                     result = await mock_llm_execute(step, context)
                 logger.info("Step %s executed via LLM (attempt %d)", step.id, attempt + 1)
             else:
                 # Browser steps — Nova Act
                 if settings.has_nova_act_key:
-                    result = await _execute_with_nova_act(step, pool=pool)
+                    async with nova_act_breaker:
+                        result = await _execute_with_nova_act(step, pool=pool)
                     logger.info("Step %s executed via Nova Act (attempt %d)", step.id, attempt + 1)
                 else:
                     await asyncio.sleep(random.uniform(0.3, 1.0))
@@ -241,6 +248,14 @@ async def execute_step(
             step.retries = attempt
             step.cost_usd = result.get("cost_usd", 0.0)
             return result
+
+        except CircuitOpenError as exc:
+            # Circuit is open — fail fast without retrying
+            logger.warning(
+                "Step %s (%s) rejected by circuit breaker '%s'",
+                step.id, step.action, exc.breaker_name,
+            )
+            return {"success": False, "error": str(exc)}
 
         except Exception as exc:
             last_error = exc
@@ -258,9 +273,10 @@ async def execute_step(
                 break
 
             if attempt < step.max_retries:
-                wait = 2 ** attempt
+                # Jittered exponential backoff
+                wait = (2 ** attempt) + random.uniform(0, 1)
                 logger.warning(
-                    "Step %s attempt %d failed (%s), retrying in %ds",
+                    "Step %s attempt %d failed (%s), retrying in %.1fs",
                     step.id, attempt + 1, exc, wait,
                 )
                 await asyncio.sleep(wait)

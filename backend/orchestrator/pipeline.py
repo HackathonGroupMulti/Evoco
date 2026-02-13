@@ -13,7 +13,6 @@ Pushes live WSEvent updates through a callback for real-time frontend sync.
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
@@ -29,6 +28,7 @@ from backend.orchestrator.dag import DAGExecutor
 from backend.services.browser_pool import BrowserPool
 from backend.services.output import format_output
 from backend.services.planner import create_plan, replan
+from backend.services.task_store import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,46 +40,7 @@ async def _noop_callback(event: WSEvent) -> None:
     """Default callback that discards events."""
 
 
-class TaskStore:
-    """In-memory task store (swap for Redis/DynamoDB in production).
-
-    Maintains insertion-ordered list so list_tasks is O(limit) not O(n log n).
-    """
-
-    def __init__(self) -> None:
-        self._tasks: dict[str, TaskResult] = {}
-        self._ordered: list[TaskResult] = []  # newest first
-        self._plans: dict[str, TaskPlan] = {}
-
-    def new_task(self, command: str, output_format: OutputFormat) -> TaskResult:
-        task_id = uuid.uuid4().hex[:12]
-        result = TaskResult(
-            task_id=task_id,
-            status=TaskStatus.QUEUED,
-            command=command,
-            output_format=output_format,
-        )
-        self._tasks[task_id] = result
-        self._ordered.insert(0, result)  # newest first
-        return result
-
-    def get(self, task_id: str) -> TaskResult | None:
-        return self._tasks.get(task_id)
-
-    def set_plan(self, task_id: str, plan: TaskPlan) -> None:
-        self._plans[task_id] = plan
-        if task_id in self._tasks:
-            self._tasks[task_id].plan = plan
-
-    def get_plan(self, task_id: str) -> TaskPlan | None:
-        return self._plans.get(task_id)
-
-    def list_tasks(self, limit: int = 50) -> list[TaskResult]:
-        """Return most recent tasks — O(limit) slice, no sorting needed."""
-        return self._ordered[:limit]
-
-
-# Singleton store
+# Singleton store (Redis-backed with in-memory fallback)
 store = TaskStore()
 
 
@@ -122,6 +83,7 @@ async def run_task(
     try:
         # ---- Stage 1: Planning ----
         task.status = TaskStatus.PLANNING
+        store.save(task)
         plan_start = datetime.now(timezone.utc)
 
         await on_event(WSEvent(task_id=task_id, event="planning_started", data={}))
@@ -149,6 +111,7 @@ async def run_task(
 
         # ---- Stage 2: DAG Execution ----
         task.status = TaskStatus.EXECUTING
+        store.save(task)
         exec_start = datetime.now(timezone.utc)
 
         dag = DAGExecutor(plan=plan, on_event=on_event, pool=pool)
@@ -224,6 +187,7 @@ async def run_task(
 
         trace = _build_trace(plan, plan_duration_ms, exec_duration_ms)
         task.cost_usd = trace["total_cost_usd"]
+        store.save(task)
 
         await on_event(WSEvent(
             task_id=task_id,
@@ -245,6 +209,7 @@ async def run_task(
         task.status = TaskStatus.FAILED
         task.error = f"{type(exc).__name__}: {exc}"
         task.finished_at = datetime.now(timezone.utc)
+        store.save(task)
         await on_event(WSEvent(
             task_id=task_id,
             event="task_done",

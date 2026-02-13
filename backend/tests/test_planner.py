@@ -33,8 +33,8 @@ class TestMockPlan:
 class TestStepsFromRaw:
     def test_builds_dependency_chain(self) -> None:
         raw = [
-            {"action": "navigate", "target": "https://a.com", "description": "go"},
-            {"action": "search", "target": "https://a.com", "description": "search"},
+            {"action": "navigate", "target": "https://a.com", "description": "go", "depends_on": []},
+            {"action": "search", "target": "https://a.com", "description": "search", "depends_on": [0]},
         ]
         steps = _steps_from_raw(raw, "test-1")
         assert len(steps) == 2

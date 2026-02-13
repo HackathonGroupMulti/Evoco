@@ -1,10 +1,20 @@
 """Tests for the FastAPI endpoints."""
 
+import os
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
+from backend.config import settings
 from backend.main import app
+
+# Skip slow integration tests when live credentials are configured
+_live_mode = settings.has_aws_credentials
+_skip_live = pytest.mark.skipif(
+    _live_mode,
+    reason="Skipped in live mode — requires real browser automation",
+)
 
 
 @pytest_asyncio.fixture
@@ -16,13 +26,16 @@ async def client():
 
 @pytest.mark.asyncio
 async def test_health(client: AsyncClient) -> None:
-    resp = await client.get("/health")
+    resp = await client.get("/api/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["mode"] == "mock"  # no AWS keys in test
+    assert data["mode"] in ("mock", "live")
+    assert "store_backend" in data
+    assert "circuit_breakers" in data
 
 
+@_skip_live
 @pytest.mark.asyncio
 async def test_create_task_sync(client: AsyncClient) -> None:
     resp = await client.post(
@@ -35,6 +48,7 @@ async def test_create_task_sync(client: AsyncClient) -> None:
     assert data["output"]["total_results"] > 0
 
 
+@_skip_live
 @pytest.mark.asyncio
 async def test_create_task_csv(client: AsyncClient) -> None:
     resp = await client.post(
@@ -47,6 +61,7 @@ async def test_create_task_csv(client: AsyncClient) -> None:
     assert "name,price,rating,source" in data["output"]
 
 
+@_skip_live
 @pytest.mark.asyncio
 async def test_list_tasks(client: AsyncClient) -> None:
     # Create one first

@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     max_tasks_per_minute: int = 10
     max_concurrent_tasks: int = 5
 
+    # Persistence (Redis)
+    redis_url: str = ""
+
+    # Auth
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_minutes: int = 60
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
