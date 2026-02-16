@@ -178,7 +178,7 @@ export default function App() {
         </div>
 
         <div className="w-80 shrink-0">
-          <ResultsPanel result={displayResult} connectionState={connectionState} />
+          <ResultsPanel result={displayResult} connectionState={connectionState} steps={steps} trace={trace} />
         </div>
       </main>
 

@@ -1,17 +1,82 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import type { TaskResult } from "@/types";
+import type { TaskResult, TaskStep, TaskTrace } from "@/types";
 import type { ConnectionState } from "@/hooks/useTaskRunner";
 
 interface ResultsPanelProps {
   result: TaskResult | null;
   connectionState: ConnectionState;
+  steps: TaskStep[];
+  trace: TaskTrace | null;
 }
 
-export function ResultsPanel({ result, connectionState }: ResultsPanelProps) {
+function buildDiagnosticSnapshot(
+  result: TaskResult,
+  steps: TaskStep[],
+  trace: TaskTrace | null
+): string {
+  const lines: string[] = [
+    `=== EVOCO DIAGNOSTIC SNAPSHOT ===`,
+    `Task:     ${result.task_id}`,
+    `Command:  ${result.command}`,
+    `Status:   ${result.status}`,
+  ];
+
+  if (result.error) lines.push(`Error:    ${result.error}`);
+  if (result.duration_ms != null) lines.push(`Duration: ${(result.duration_ms / 1000).toFixed(2)}s`);
+  if (result.cost_usd != null) lines.push(`Cost:     $${result.cost_usd.toFixed(4)}`);
+  if (trace) {
+    lines.push(`Planning: ${(trace.planning_ms / 1000).toFixed(2)}s`);
+    lines.push(`Execution:${(trace.execution_ms / 1000).toFixed(2)}s`);
+  }
+
+  lines.push("", "--- Steps ---");
+
+  const stepSource = trace?.steps ?? [];
+  for (const ts of stepSource) {
+    const matching = steps.find((s) => s.id === ts.id);
+    const target = matching?.target ?? "";
+    const desc = matching?.description ?? "";
+    const dur = ts.duration_ms != null ? `${(ts.duration_ms / 1000).toFixed(2)}s` : "-";
+    const retries = ts.retries > 0 ? ` (${ts.retries} retries)` : "";
+
+    lines.push(`[${ts.status.toUpperCase().padEnd(9)}] ${ts.id}`);
+    lines.push(`  action:   ${ts.action} | executor: ${ts.executor} | group: ${ts.group}`);
+    if (target) lines.push(`  target:   ${target}`);
+    if (desc) lines.push(`  desc:     ${desc}`);
+    lines.push(`  duration: ${dur}${retries} | cost: $${ts.cost_usd.toFixed(4)}`);
+    if (ts.error) lines.push(`  error:    ${ts.error}`);
+  }
+
+  // Fallback: if no trace yet, use live steps
+  if (stepSource.length === 0 && steps.length > 0) {
+    for (const s of steps) {
+      lines.push(`[${s.status.toUpperCase().padEnd(9)}] ${s.id}`);
+      lines.push(`  action: ${s.action} | executor: ${s.executor ?? "?"} | target: ${s.target}`);
+      if (s.description) lines.push(`  desc:   ${s.description}`);
+      if (s.error) lines.push(`  error:  ${s.error}`);
+    }
+  }
+
+  lines.push("", `Generated: ${new Date().toISOString()}`);
+  return lines.join("\n");
+}
+
+export function ResultsPanel({ result, connectionState, steps, trace }: ResultsPanelProps) {
   const isRunning = connectionState === "connecting" || connectionState === "running";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyDiagnostics = () => {
+    if (!result) return;
+    const snapshot = buildDiagnosticSnapshot(result, steps, trace);
+    navigator.clipboard.writeText(snapshot).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   return (
     <Card className="glass-panel flex h-full flex-col border-border/30">
@@ -24,6 +89,15 @@ export function ResultsPanel({ result, connectionState }: ResultsPanelProps) {
             </span>
           </CardTitle>
           <div className="flex items-center gap-2">
+            {result && (
+              <button
+                onClick={handleCopyDiagnostics}
+                className="rounded-md px-2 py-0.5 text-[10px] font-medium border transition-all duration-200 border-border/40 text-muted-foreground hover:text-neon-cyan hover:border-neon-cyan/40"
+                title="Copy diagnostic snapshot to clipboard"
+              >
+                {copied ? "Copied!" : "Copy Diagnostics"}
+              </button>
+            )}
             {result?.cost_usd != null && result.cost_usd > 0 && (
               <Badge
                 variant="outline"
