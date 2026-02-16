@@ -28,22 +28,22 @@ You are an autonomous task planner. Given a user command, decompose it into
 a list of concrete steps that an AI agent will execute.
 
 There are TWO types of executors:
-  - "browser": for steps that require visiting a website (navigate, search, extract, click, fill)
+  - "browser": for steps that require visiting a website. Use ONE "search" step per site —
+    the agent will navigate to the site, search, and extract data automatically.
   - "llm": for steps that require reasoning over data (compare, analyze, rank, summarize)
 
 Steps that can run in parallel should NOT depend on each other.
 For example, searching Amazon and searching Best Buy are independent and can run in parallel.
 Only add a dependency when a step truly needs the output of a prior step.
 
-IMPORTANT — description rules for browser steps:
-  - Keep descriptions SHORT (under 10 words). They drive a browser automation agent.
+IMPORTANT — description rules:
+  - Keep descriptions SHORT (under 10 words).
   - For "search" actions: only state WHAT to search for. Example: "espresso machines under $500"
-  - For "extract" actions: just say "Extract product results"
-  - For "navigate" actions: just say "Open <site name>"
+  - Do NOT generate separate "navigate" or "extract" steps — search handles everything.
   - NEVER include JSON, schemas, formatting instructions, or site names in search descriptions.
 
 Reply ONLY with a JSON array. Each element must have:
-  - "action": the type of action (e.g. "navigate", "search", "extract", "compare", "summarize")
+  - "action": "search", "compare", or "summarize"
   - "target": full URL (use "aggregated" for LLM steps that process collected data)
   - "description": short action-only instruction (see rules above)
   - "executor": "browser" or "llm"
@@ -52,14 +52,10 @@ Reply ONLY with a JSON array. Each element must have:
 
 Example for "compare laptops on Amazon and Best Buy":
 [
-  {"action": "navigate", "target": "https://www.amazon.com", "description": "Open Amazon", "executor": "browser", "group": "amazon", "depends_on": []},
-  {"action": "search", "target": "https://www.amazon.com", "description": "laptops under $800", "executor": "browser", "group": "amazon", "depends_on": [0]},
-  {"action": "extract", "target": "https://www.amazon.com", "description": "Extract product results", "executor": "browser", "group": "amazon", "depends_on": [1]},
-  {"action": "navigate", "target": "https://www.bestbuy.com", "description": "Open Best Buy", "executor": "browser", "group": "bestbuy", "depends_on": []},
-  {"action": "search", "target": "https://www.bestbuy.com", "description": "laptops under $800", "executor": "browser", "group": "bestbuy", "depends_on": [3]},
-  {"action": "extract", "target": "https://www.bestbuy.com", "description": "Extract product results", "executor": "browser", "group": "bestbuy", "depends_on": [4]},
-  {"action": "compare", "target": "aggregated", "description": "Compare and rank by value", "executor": "llm", "group": "analysis", "depends_on": [2, 5]},
-  {"action": "summarize", "target": "aggregated", "description": "Final summary with recommendations", "executor": "llm", "group": "analysis", "depends_on": [6]}
+  {"action": "search", "target": "https://www.amazon.com", "description": "laptops under $800", "executor": "browser", "group": "amazon", "depends_on": []},
+  {"action": "search", "target": "https://www.bestbuy.com", "description": "laptops under $800", "executor": "browser", "group": "bestbuy", "depends_on": []},
+  {"action": "compare", "target": "aggregated", "description": "Compare and rank by value", "executor": "llm", "group": "analysis", "depends_on": [0, 1]},
+  {"action": "summarize", "target": "aggregated", "description": "Final summary with recommendations", "executor": "llm", "group": "analysis", "depends_on": [2]}
 ]
 
 Do NOT include any text outside the JSON array.
@@ -149,10 +145,9 @@ def _mock_plan(command: str) -> list[dict]:
         sites = [("https://www.google.com", "google")]
 
     steps: list[dict] = []
-    extract_indices: list[int] = []
+    search_indices: list[int] = []
 
     # Extract a short search query from the user command
-    # Strip site names and filler words to get the core search intent
     search_query = cmd
     for kw in ["amazon", "best buy", "newegg", "walmart", "ebay",
                "linkedin", "indeed", "zillow", "yelp",
@@ -164,33 +159,22 @@ def _mock_plan(command: str) -> list[dict]:
         search_query = command  # fallback to original
 
     for url, group in sites:
-        base_idx = len(steps)
-        site_name = group.replace("bestbuy", "Best Buy").title()
-        steps.append({
-            "action": "navigate", "target": url,
-            "description": f"Open {site_name}",
-            "executor": "browser", "group": group, "depends_on": [],
-        })
+        idx = len(steps)
         steps.append({
             "action": "search", "target": url,
             "description": search_query,
-            "executor": "browser", "group": group, "depends_on": [base_idx],
+            "executor": "browser", "group": group, "depends_on": [],
         })
-        steps.append({
-            "action": "extract", "target": url,
-            "description": "Extract product results",
-            "executor": "browser", "group": group, "depends_on": [base_idx + 1],
-        })
-        extract_indices.append(base_idx + 2)
+        search_indices.append(idx)
 
     steps.append({
         "action": "compare", "target": "aggregated",
-        "description": "Compare and rank extracted results across all sources",
-        "executor": "llm", "group": "analysis", "depends_on": extract_indices,
+        "description": "Compare and rank by value",
+        "executor": "llm", "group": "analysis", "depends_on": search_indices,
     })
     steps.append({
         "action": "summarize", "target": "aggregated",
-        "description": "Produce final summary with recommendations",
+        "description": "Final summary with recommendations",
         "executor": "llm", "group": "analysis", "depends_on": [len(steps) - 1],
     })
     return steps

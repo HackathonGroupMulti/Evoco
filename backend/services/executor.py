@@ -82,8 +82,8 @@ def _build_browser_prompt(step: TaskStep) -> str:
         query = _extract_search_query(step)
         url = _search_url_for(step.target, query)
         if url:
-            return f"Go to {url} and extract the product names, prices, and ratings from the search results"
-        return f"Search for: {query} and extract the product names, prices, and ratings"
+            return f"Go to {url}"
+        return f"Search for: {query}"
     if action == "extract":
         return "Extract the product names, prices, and ratings visible on this page"
     # Generic fallback
@@ -119,7 +119,7 @@ async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, 
     return await asyncio.to_thread(_run)
 
 
-_EXTRACT_ACTIONS = frozenset({"extract", "search"})
+_EXTRACT_PROMPT = "Extract the product names, prices, and ratings visible on this page"
 
 
 def _run_in_session(
@@ -129,7 +129,13 @@ def _run_in_session(
     out: dict[str, Any] = {"success": True, "url": step.target,
                            "cost_usd": estimate_browser_cost(), "executor": "browser"}
 
-    if step.action in _EXTRACT_ACTIONS:
+    if step.action == "search":
+        # Phase 1: navigate to the search URL
+        nova.act(prompt)
+        # Phase 2: extract structured data from the landed page
+        result = nova.act_get(_EXTRACT_PROMPT, schema=schema) if schema else nova.act_get(_EXTRACT_PROMPT)
+        out["response"] = parse_result(result.response, getattr(result, "parsed_response", None))
+    elif step.action == "extract":
         result = nova.act_get(prompt, schema=schema) if schema else nova.act_get(prompt)
         out["response"] = parse_result(result.response, getattr(result, "parsed_response", None))
     else:
