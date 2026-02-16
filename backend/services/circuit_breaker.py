@@ -79,24 +79,38 @@ class CircuitBreaker:
 
     @property
     def state(self) -> CircuitState:
-        """Current circuit state (may transition OPEN → HALF_OPEN on read)."""
+        """Current circuit state, with synchronous timeout check for observability."""
         if (
             self._state == CircuitState.OPEN
             and time.monotonic() - self._last_failure_time >= self.recovery_timeout
         ):
             self._state = CircuitState.HALF_OPEN
             logger.info(
-                "Circuit breaker '%s': OPEN → HALF_OPEN (recovery timeout elapsed)",
+                "Circuit breaker '%s': OPEN -> HALF_OPEN (recovery timeout elapsed)",
                 self.name,
             )
         return self._state
+
+    async def _check_state(self) -> CircuitState:
+        """Check and transition state under lock if recovery timeout elapsed."""
+        async with self._lock:
+            if (
+                self._state == CircuitState.OPEN
+                and time.monotonic() - self._last_failure_time >= self.recovery_timeout
+            ):
+                self._state = CircuitState.HALF_OPEN
+                logger.info(
+                    "Circuit breaker '%s': OPEN -> HALF_OPEN (recovery timeout elapsed)",
+                    self.name,
+                )
+            return self._state
 
     @property
     def stats(self) -> dict[str, Any]:
         """Return circuit breaker statistics for observability."""
         return {
             "name": self.name,
-            "state": self.state.value,
+            "state": self._state.value,
             "failure_count": self._failure_count,
             "success_count": self._success_count,
             "failure_threshold": self.failure_threshold,
@@ -105,7 +119,7 @@ class CircuitBreaker:
 
     async def __aenter__(self) -> CircuitBreaker:
         """Check circuit state before allowing the call."""
-        state = self.state
+        state = await self._check_state()
 
         if state == CircuitState.OPEN:
             retry_after = self.recovery_timeout - (

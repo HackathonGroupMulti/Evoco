@@ -30,7 +30,7 @@ const STATUS_STYLES: Record<
   running: {
     border: "border-neon-cyan",
     bg: "bg-gradient-to-br from-neon-cyan/15 to-neon-purple/10",
-    glow: "shadow-[0_0_20px_rgba(34,211,238,0.3),0_0_40px_rgba(34,211,238,0.1)]",
+    glow: "shadow-[0_0_30px_rgba(6,182,212,0.3),0_0_60px_rgba(6,182,212,0.1)]",
     icon: "text-neon-cyan",
   },
   completed: {
@@ -105,7 +105,7 @@ function StepNode({ data }: NodeProps) {
         className="!bg-neon-cyan/40 !border-0 !w-2 !h-2"
       />
       <div
-        className={`node-enter rounded-xl border px-4 py-3 min-w-[200px] max-w-[240px] transition-all duration-500 ${style.border} ${style.bg} ${style.glow}`}
+        className={`node-enter rounded-2xl border px-3 py-3 min-w-[180px] max-w-[200px] transition-all duration-700 ${style.border} ${style.bg} ${style.glow}`}
       >
         <div className="flex items-center gap-2 mb-1.5">
           {/* Icon: site-specific or action-based */}
@@ -153,6 +153,24 @@ function StepNode({ data }: NodeProps) {
           <div className="mt-2 rounded-md bg-neon-emerald/[0.08] border border-neon-emerald/15 px-2 py-1">
             <p className="text-[9px] text-neon-emerald/70 font-medium truncate">
               {resultPreview}
+            </p>
+          </div>
+        )}
+
+        {/* Error detail badge */}
+        {step.status === "failed" && step.error && (
+          <div className="mt-2 rounded-md bg-neon-rose/[0.08] border border-neon-rose/15 px-2 py-1">
+            <p className="text-[9px] text-neon-rose/70 font-medium line-clamp-2">
+              {step.error}
+            </p>
+          </div>
+        )}
+
+        {/* Skipped detail badge */}
+        {step.status === "skipped" && (
+          <div className="mt-2 rounded-md bg-muted/20 border border-border/20 px-2 py-1">
+            <p className="text-[9px] text-muted-foreground/50 font-medium">
+              {step.error ?? "skipped"}
             </p>
           </div>
         )}
@@ -280,7 +298,7 @@ export function TaskGraph({ steps }: TaskGraphProps) {
             animated: step.status === "running",
             style: {
               stroke: isCompleted
-                ? "var(--neon-emerald)"
+                ? "var(--neon-amber)"
                 : isActive
                   ? "var(--neon-cyan)"
                   : "oklch(0.4 0 0 / 30%)",
@@ -330,14 +348,14 @@ export function TaskGraph({ steps }: TaskGraphProps) {
         <CardTitle className="flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
           <span className="h-1.5 w-1.5 rounded-full bg-neon-purple animate-glow-pulse" />
           <span className="bg-gradient-to-r from-neon-purple to-neon-cyan bg-clip-text text-transparent">
-            Task Graph
+            Neural Map
           </span>
           {steps.length > 0 && (
             <span className="ml-2 text-[10px] font-normal text-muted-foreground/50">
               {completedCount}/{steps.length} steps
               {runningCount > 0 && (
                 <span className="ml-1 text-neon-cyan">
-                  ({runningCount} active)
+                  ({runningCount} firing)
                 </span>
               )}
             </span>
@@ -352,7 +370,7 @@ export function TaskGraph({ steps }: TaskGraphProps) {
                 <span className="text-lg text-neon-purple/40">{"\u{1F4CA}"}</span>
               </div>
               <p className="text-sm text-muted-foreground/40 italic">
-                Submit a command to see the plan
+                Neural pathways will form here
               </p>
             </div>
           </div>
@@ -371,11 +389,11 @@ export function TaskGraph({ steps }: TaskGraphProps) {
             className="bg-transparent"
           >
             <Background
-              variant={BackgroundVariant.Dots}
-              gap={24}
+              variant={BackgroundVariant.Cross}
+              gap={30}
               size={1}
               color="var(--neon-cyan)"
-              className="opacity-[0.08]"
+              className="opacity-[0.05]"
             />
           </ReactFlow>
         )}

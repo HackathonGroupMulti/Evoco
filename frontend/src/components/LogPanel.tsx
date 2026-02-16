@@ -50,7 +50,7 @@ export function LogPanel() {
               }`}
             />
             <span className="bg-gradient-to-r from-neon-amber to-neon-rose bg-clip-text text-transparent">
-              Logs
+              System Consciousness
             </span>
           </CardTitle>
           <div className="flex items-center gap-1.5">

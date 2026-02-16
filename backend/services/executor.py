@@ -82,10 +82,8 @@ def _build_browser_prompt(step: TaskStep) -> str:
         query = _extract_search_query(step)
         url = _search_url_for(step.target, query)
         if url:
-            # Skip the UI entirely — go straight to results
-            return f"Go to {url}"
-        # Unknown site — fall back to using the site search
-        return f"Use the site search to find: {query}"
+            return f"Go to {url} and extract the product names, prices, and ratings from the search results"
+        return f"Search for: {query} and extract the product names, prices, and ratings"
     if action == "extract":
         return "Extract the product names, prices, and ratings visible on this page"
     # Generic fallback
@@ -97,7 +95,11 @@ _NO_RETRY_PATTERNS = ("ExceededMaxSteps", "ActExceededMaxSteps")
 
 
 async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, Any]:
-    """Execute a single step using the Nova Act SDK."""
+    """Execute a single step using the Nova Act SDK.
+
+    All Playwright/NovaAct calls run inside asyncio.to_thread to avoid
+    'Sync API inside asyncio loop' errors from Playwright.
+    """
     from nova_act import NovaAct  # type: ignore[import-untyped]
 
     schema = schema_for_action(step.action)
@@ -106,12 +108,6 @@ async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, 
     logger.info("Nova Act prompt for step %s: %s", step.id, prompt)
 
     def _run() -> dict[str, Any]:
-        # Use pool session if available, otherwise create new
-        if pool is not None:
-            nova = pool.get_session(step.target)
-            if nova is not None:
-                return _run_in_session(nova, step, prompt, schema)
-
         with NovaAct(
             nova_act_api_key=settings.nova_act_api_key,
             starting_page=step.target if step.target.startswith("http") else "https://www.google.com",
@@ -123,7 +119,7 @@ async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, 
     return await asyncio.to_thread(_run)
 
 
-_EXTRACT_ACTIONS = frozenset({"extract"})
+_EXTRACT_ACTIONS = frozenset({"extract", "search"})
 
 
 def _run_in_session(

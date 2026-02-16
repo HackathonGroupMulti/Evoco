@@ -1,5 +1,32 @@
 import { useCallback, useRef, useState } from "react";
 
+// Local type declarations for the Web Speech API
+interface SpeechRecognitionResult {
+  readonly isFinal: boolean;
+  readonly length: number;
+  [index: number]: { transcript: string; confidence: number };
+}
+
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionEventLocal {
+  readonly results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLocal) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
 interface VoiceOrbProps {
   onTranscript: (text: string) => void;
   onComplete: (text: string) => void;
@@ -8,7 +35,7 @@ interface VoiceOrbProps {
 export function VoiceOrb({ onTranscript, onComplete }: VoiceOrbProps) {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const toggleListening = useCallback(() => {
     if (isListening) {
@@ -29,7 +56,7 @@ export function VoiceOrb({ onTranscript, onComplete }: VoiceOrbProps) {
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: SpeechRecognitionEventLocal) => {
       let final = "";
       let interim = "";
       for (let i = 0; i < event.results.length; i++) {
@@ -114,7 +141,7 @@ export function VoiceOrb({ onTranscript, onComplete }: VoiceOrbProps) {
 // Type declarations for Speech Recognition API
 declare global {
   interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
+    SpeechRecognition: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition: new () => SpeechRecognitionInstance;
   }
 }

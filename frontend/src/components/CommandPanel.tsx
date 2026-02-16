@@ -53,7 +53,7 @@ export function CommandPanel({
         <CardTitle className="flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
           <span className="h-1.5 w-1.5 rounded-full bg-neon-cyan animate-glow-pulse" />
           <span className="bg-gradient-to-r from-neon-cyan to-neon-emerald bg-clip-text text-transparent">
-            Command
+            Communicate
           </span>
         </CardTitle>
       </CardHeader>
@@ -61,7 +61,7 @@ export function CommandPanel({
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="gradient-border rounded-lg">
             <Input
-              placeholder="What do you want to research?"
+              placeholder="Tell me what you need..."
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               disabled={isRunning}
@@ -107,19 +107,19 @@ export function CommandPanel({
           <Button
             type="submit"
             disabled={isRunning || !command.trim()}
-            className="w-full bg-gradient-to-r from-neon-cyan to-neon-purple text-white font-semibold hover:from-neon-cyan/90 hover:to-neon-purple/90 transition-all duration-300 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)] disabled:opacity-40 disabled:hover:shadow-none"
+            className="w-full bg-gradient-to-r from-neon-cyan to-neon-purple text-white font-semibold hover:from-neon-cyan/90 hover:to-neon-purple/90 transition-all duration-300 hover:shadow-[0_0_20px_rgba(6,182,212,0.3)] disabled:opacity-40 disabled:hover:shadow-none"
           >
             {isRunning ? (
               <span className="flex items-center gap-2">
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
-                Researching...
+                <span className="h-3 w-3 rounded-full border-2 border-white/70 border-t-transparent" style={{ animation: "breathe 1.5s ease-in-out infinite" }} />
+                Thinking...
               </span>
             ) : (
               <span className="flex items-center gap-2">
                 <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
                 </svg>
-                Launch Research
+                Ask Evoco
               </span>
             )}
           </Button>
@@ -129,12 +129,12 @@ export function CommandPanel({
 
         <div className="flex-1 overflow-hidden">
           <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
-            History
+            Memory
           </p>
           <ScrollArea className="h-full">
             <div className="flex flex-col gap-1 pr-3">
               {history.length === 0 && (
-                <p className="text-xs text-muted-foreground/40 italic">No tasks yet</p>
+                <p className="text-xs text-muted-foreground/40 italic">No memories yet</p>
               )}
               {history.map((task) => (
                 <button

@@ -303,6 +303,8 @@ def _build_trace(
             )
             entry["started_at"] = step.started_at.isoformat()
             entry["finished_at"] = step.finished_at.isoformat()
+        if step.error:
+            entry["error"] = step.error
         steps_trace.append(entry)
 
     return {

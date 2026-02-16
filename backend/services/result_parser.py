@@ -110,7 +110,7 @@ def _llm_repair(malformed: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         # Try greedy first, then non-greedy
-        for pattern in (r"[\[{][\s\S]*[\]}]", r"[\[{][\s\S]*?[\]}]"):
+        for pattern in (r"[\[{][\s\S]*[}\]]", r"[\[{][\s\S]*?[}\]]"):
             match = re.search(pattern, text)
             if match:
                 try:

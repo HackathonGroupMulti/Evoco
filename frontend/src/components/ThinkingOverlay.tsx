@@ -5,9 +5,9 @@ interface ThinkingOverlayProps {
 }
 
 const FALLBACK_MESSAGES = [
-  "Analyzing your request and identifying the best approach...",
-  "Determining which sites to search and what data to extract...",
-  "Building an execution plan with parallel branches for speed...",
+  "Processing your request... forming initial connections...",
+  "Mapping the information landscape... identifying key sources...",
+  "Synthesizing an approach... preparing to explore...",
 ];
 
 export function ThinkingOverlay({ reasoning }: ThinkingOverlayProps) {
@@ -18,35 +18,20 @@ export function ThinkingOverlay({ reasoning }: ThinkingOverlayProps) {
           className="flex flex-col items-center gap-6 max-w-md text-center"
           style={{ animation: "hero-fade-in 0.4s ease-out" }}
         >
-          {/* Animated brain/thinking icon */}
-          <div className="relative">
-            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-neon-cyan/20 to-neon-purple/20 border border-neon-cyan/30 flex items-center justify-center">
-              <span className="text-2xl">{"\u{1F9E0}"}</span>
-            </div>
-            {/* Radar sweep */}
-            <div className="absolute inset-0 rounded-2xl overflow-hidden">
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: "conic-gradient(from 0deg, transparent 0%, var(--neon-cyan) 10%, transparent 20%)",
-                  animation: "radar-sweep 2s linear infinite",
-                  opacity: 0.15,
-                }}
-              />
-            </div>
-            {/* Expanding rings */}
-            <div className="absolute inset-0 rounded-2xl" style={{ animation: "ring-expand 2s ease-out infinite" }}>
-              <div className="h-full w-full rounded-2xl border border-neon-cyan/30" />
-            </div>
-            <div className="absolute inset-0 rounded-2xl" style={{ animation: "ring-expand 2s ease-out infinite 0.6s" }}>
-              <div className="h-full w-full rounded-2xl border border-neon-cyan/20" />
-            </div>
+          {/* Entity orb — active state with neural pulses */}
+          <div className="relative flex items-center justify-center">
+            <div className="absolute h-20 w-20 rounded-full border border-neon-cyan/20" style={{ animation: "neural-pulse 2s ease-out infinite" }} />
+            <div className="absolute h-20 w-20 rounded-full border border-neon-cyan/15" style={{ animation: "neural-pulse 2s ease-out infinite 0.5s" }} />
+            <div className="absolute h-20 w-20 rounded-full border border-neon-purple/10" style={{ animation: "neural-pulse 2s ease-out infinite 1s" }} />
+            <div className="absolute h-20 w-20 rounded-full border border-neon-purple/8" style={{ animation: "neural-pulse 2s ease-out infinite 1.5s" }} />
+            {/* Active core orb */}
+            <div className="h-16 w-16 rounded-full entity-orb-active" />
           </div>
 
           {/* Title */}
           <div>
             <h3 className="text-lg font-semibold bg-gradient-to-r from-neon-cyan to-neon-purple bg-clip-text text-transparent">
-              Planning your research
+              Forming understanding...
             </h3>
             <div className="flex items-center justify-center gap-1 mt-2">
               <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-neon-cyan" />
@@ -58,8 +43,8 @@ export function ThinkingOverlay({ reasoning }: ThinkingOverlayProps) {
           {/* Reasoning text or fallback */}
           <div className="rounded-xl bg-neon-cyan/[0.05] border border-neon-cyan/10 p-4 w-full">
             {reasoning ? (
-              <p className="text-sm text-foreground/80 leading-relaxed italic">
-                "{reasoning}"
+              <p className="text-sm text-foreground/80 leading-relaxed" style={{ animation: "typewriter-fade 0.5s ease-out" }}>
+                {reasoning}
               </p>
             ) : (
               <div className="flex flex-col gap-2">
@@ -67,7 +52,7 @@ export function ThinkingOverlay({ reasoning }: ThinkingOverlayProps) {
                   <p
                     key={i}
                     className="text-xs text-muted-foreground/60 leading-relaxed"
-                    style={{ animation: `float-up 0.4s ease-out ${i * 0.15}s both` }}
+                    style={{ animation: `typewriter-fade 0.6s ease-out ${i * 0.2}s both` }}
                   >
                     {msg}
                   </p>

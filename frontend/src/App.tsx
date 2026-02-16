@@ -6,7 +6,6 @@ import { StatusBar } from "@/components/StatusBar";
 import { LandingHero } from "@/components/LandingHero";
 import { ThinkingOverlay } from "@/components/ThinkingOverlay";
 import { WaterfallView } from "@/components/WaterfallView";
-import { VoiceOrb } from "@/components/VoiceOrb";
 import { LogPanel } from "@/components/LogPanel";
 import { useTaskRunner } from "@/hooks/useTaskRunner";
 import type { HealthResponse, OutputFormat, TaskResult } from "@/types";
@@ -86,16 +85,14 @@ export default function App() {
       <header className="relative flex h-12 shrink-0 items-center justify-between border-b border-border/50 px-5">
         <div className="absolute inset-0 bg-gradient-to-r from-neon-cyan/[0.06] via-transparent to-neon-purple/[0.06]" />
         <div className="relative flex items-center gap-3">
-          {/* Logo mark */}
+          {/* Entity mark */}
           <button
             onClick={() => setHasStarted(false)}
-            className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-neon-cyan to-neon-purple hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] transition-all"
-          >
-            <span className="text-xs font-black text-white">E</span>
-          </button>
-          <h1 className="text-sm font-bold tracking-widest uppercase">
+            className="flex h-6 w-6 items-center justify-center rounded-full entity-orb-mini hover:shadow-[0_0_16px_rgba(6,182,212,0.4)] transition-all"
+          />
+          <h1 className="text-sm font-semibold tracking-wider lowercase">
             <span className="bg-gradient-to-r from-neon-cyan to-neon-purple bg-clip-text text-transparent">
-              Evoco
+              evoco
             </span>
           </h1>
         </div>
@@ -111,7 +108,7 @@ export default function App() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Graph
+              Neural Map
             </button>
             <button
               onClick={() => setShowWaterfall(true)}
@@ -126,7 +123,20 @@ export default function App() {
           </div>
         )}
 
-        {/* Logs toggle */}
+        {/* Awareness indicator */}
+        {steps.length > 0 && (
+          <div className="relative flex items-center gap-1.5">
+            <span className="text-[9px] text-muted-foreground/40 uppercase tracking-wider">Awareness</span>
+            <div className="h-1 w-12 rounded-full bg-secondary/30 overflow-hidden">
+              <div
+                className="h-full rounded-full consciousness-bar transition-all duration-700"
+                style={{ width: `${steps.length > 0 ? (completedCount / steps.length) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Consciousness toggle */}
         <button
           onClick={() => setShowLogs((v) => !v)}
           className={`relative rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
@@ -135,7 +145,7 @@ export default function App() {
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          Logs
+          Consciousness
         </button>
 
         {/* Shimmer line */}

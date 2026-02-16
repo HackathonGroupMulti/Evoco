@@ -11,24 +11,24 @@ interface StatusBarProps {
 }
 
 const STATE_CONFIG: Record<ConnectionState, { label: string; color: string; glow: string }> = {
-  idle: { label: "Ready", color: "bg-muted-foreground/40", glow: "" },
+  idle: { label: "Dormant", color: "bg-muted-foreground/40", glow: "" },
   connecting: {
-    label: "Connecting...",
+    label: "Awakening...",
     color: "bg-neon-amber",
     glow: "shadow-[0_0_6px_var(--neon-amber)]",
   },
   running: {
-    label: "Agents working",
+    label: "Thinking",
     color: "bg-neon-cyan animate-pulse",
     glow: "shadow-[0_0_6px_var(--neon-cyan)]",
   },
   done: {
-    label: "Research complete",
+    label: "Complete",
     color: "bg-neon-emerald",
     glow: "shadow-[0_0_6px_var(--neon-emerald)]",
   },
   error: {
-    label: "Error",
+    label: "Disrupted",
     color: "bg-neon-rose",
     glow: "shadow-[0_0_6px_var(--neon-rose)]",
   },
@@ -58,7 +58,7 @@ export function StatusBar({
         <>
           <span className="text-border/50">{"\u{2502}"}</span>
           <span>
-            Steps:{" "}
+            Pathways:{" "}
             <span className="text-neon-cyan font-medium">{stepsCompleted}</span>
             <span className="text-muted-foreground/40">/{stepsTotal}</span>
           </span>
@@ -99,7 +99,7 @@ export function StatusBar({
                 : "border-border text-muted-foreground"
           }`}
         >
-          {mode === "live" ? "Live" : mode === "mock" ? "Demo" : "\u{2014}"}
+          {mode === "live" ? "Awake" : mode === "mock" ? "Dreaming" : "\u{2014}"}
         </Badge>
       </span>
     </div>

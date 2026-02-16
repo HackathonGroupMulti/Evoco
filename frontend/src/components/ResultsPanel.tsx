@@ -20,7 +20,7 @@ export function ResultsPanel({ result, connectionState }: ResultsPanelProps) {
           <CardTitle className="flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
             <span className="h-1.5 w-1.5 rounded-full bg-neon-emerald animate-glow-pulse" />
             <span className="bg-gradient-to-r from-neon-emerald to-neon-cyan bg-clip-text text-transparent">
-              Results
+              Response
             </span>
           </CardTitle>
           <div className="flex items-center gap-2">
@@ -51,7 +51,7 @@ export function ResultsPanel({ result, connectionState }: ResultsPanelProps) {
                 <span className="text-lg text-neon-emerald/40">{"\u{1F4CA}"}</span>
               </div>
               <p className="text-sm text-muted-foreground/40 italic text-center">
-                Your research results<br />will appear here
+                I'll share my findings here
               </p>
             </div>
           </div>
@@ -60,11 +60,10 @@ export function ResultsPanel({ result, connectionState }: ResultsPanelProps) {
         {isRunning && !result && (
           <div className="flex h-full items-center justify-center">
             <div className="flex flex-col items-center gap-4">
-              <div className="relative h-10 w-10">
-                <span className="absolute inset-0 rounded-full border-2 border-neon-cyan/20" />
-                <span className="absolute inset-0 rounded-full border-2 border-neon-cyan border-t-transparent animate-spin" />
-              </div>
-              <p className="text-sm text-neon-cyan/60">Agents are working...</p>
+              <div className="h-10 w-10 rounded-full entity-orb-active" />
+              <p className="text-sm text-neon-cyan/60" style={{ animation: "breathe 2s ease-in-out infinite" }}>
+                Gathering understanding...
+              </p>
             </div>
           </div>
         )}
@@ -79,7 +78,7 @@ function ResultContent({ result }: { result: TaskResult }) {
   if (result.status === "failed") {
     return (
       <div className="rounded-lg bg-gradient-to-br from-neon-rose/10 to-neon-amber/5 border border-neon-rose/30 p-4 glow-rose">
-        <p className="text-sm font-semibold text-neon-rose">Research failed</p>
+        <p className="text-sm font-semibold text-neon-rose">I encountered a disruption</p>
         <p className="mt-1.5 text-xs text-muted-foreground">{result.error}</p>
       </div>
     );
@@ -92,13 +91,13 @@ function ResultContent({ result }: { result: TaskResult }) {
           value="formatted"
           className="flex-1 data-[state=active]:bg-gradient-to-r data-[state=active]:from-neon-cyan/10 data-[state=active]:to-neon-purple/10 data-[state=active]:text-foreground"
         >
-          Insights
+          Understanding
         </TabsTrigger>
         <TabsTrigger
           value="raw"
           className="flex-1 data-[state=active]:bg-gradient-to-r data-[state=active]:from-neon-cyan/10 data-[state=active]:to-neon-purple/10 data-[state=active]:text-foreground"
         >
-          Raw Data
+          Raw Memory
         </TabsTrigger>
       </TabsList>
       <TabsContent value="formatted" className="flex-1 overflow-hidden mt-3">
@@ -171,10 +170,10 @@ function FormattedOutput({ result }: { result: TaskResult }) {
       {/* Hero card for #1 pick */}
       {topPick && (
         <div className="hero-card-border rounded-xl">
-          <div className="rounded-xl bg-gradient-to-br from-neon-emerald/[0.12] to-neon-cyan/[0.08] p-4">
+          <div className="rounded-xl bg-gradient-to-br from-neon-amber/[0.12] to-neon-cyan/[0.08] p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Badge className="bg-neon-emerald/20 text-neon-emerald border-neon-emerald/30 text-[10px] font-bold">
-                {"\u{1F3C6}"} TOP PICK
+              <Badge className="bg-neon-amber/20 text-neon-amber border-neon-amber/30 text-[10px] font-bold">
+                {"\u{1F3C6}"} MY RECOMMENDATION
               </Badge>
               {topPick.source && (
                 <span className="text-[10px] text-muted-foreground/50">{topPick.source}</span>

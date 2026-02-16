@@ -44,7 +44,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Custom accent palette */
+  /* Custom accent palette — names kept for Tailwind class compat */
   --color-neon-cyan: var(--neon-cyan);
   --color-neon-purple: var(--neon-purple);
   --color-neon-emerald: var(--neon-emerald);
@@ -55,6 +55,9 @@
   --animate-shimmer: shimmer 2s linear infinite;
   --animate-glow-pulse: glow-pulse 2s ease-in-out infinite;
   --animate-gradient-x: gradient-x 3s ease infinite;
+  --animate-breathe: breathe 4s ease-in-out infinite;
+  --animate-neural-pulse: neural-pulse 2.5s ease-out infinite;
+  --animate-synapse-flow: synapse-flow 2s linear infinite;
 }
 
 :root {
@@ -91,51 +94,51 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  --neon-cyan: #22d3ee;
-  --neon-purple: #a855f7;
-  --neon-emerald: #34d399;
-  --neon-amber: #fbbf24;
-  --neon-rose: #fb7185;
+  --neon-cyan: #06b6d4;
+  --neon-purple: #8b5cf6;
+  --neon-emerald: #10b981;
+  --neon-amber: #f59e0b;
+  --neon-rose: #f43f5e;
 }
 
 .dark {
-  --background: oklch(0.13 0.005 260);
+  --background: oklch(0.11 0.008 250);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.17 0.008 260);
+  --card: oklch(0.14 0.012 250);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.17 0.008 260);
+  --popover: oklch(0.14 0.012 250);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.75 0.15 200);
-  --primary-foreground: oklch(0.13 0.005 260);
-  --secondary: oklch(0.22 0.01 260);
+  --primary: oklch(0.72 0.16 195);
+  --primary-foreground: oklch(0.11 0.008 250);
+  --secondary: oklch(0.20 0.012 250);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.22 0.01 260);
+  --muted: oklch(0.20 0.012 250);
   --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.22 0.015 260);
+  --accent: oklch(0.20 0.018 250);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.75 0.15 200);
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.72 0.16 195);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.17 0.008 260);
+  --sidebar: oklch(0.14 0.012 250);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.22 0.01 260);
+  --sidebar-accent: oklch(0.20 0.012 250);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-border: oklch(1 0 0 / 7%);
   --sidebar-ring: oklch(0.556 0 0);
 
-  --neon-cyan: #22d3ee;
-  --neon-purple: #a855f7;
-  --neon-emerald: #34d399;
-  --neon-amber: #fbbf24;
-  --neon-rose: #fb7185;
+  --neon-cyan: #06b6d4;
+  --neon-purple: #8b5cf6;
+  --neon-emerald: #10b981;
+  --neon-amber: #f59e0b;
+  --neon-rose: #f43f5e;
 }
 
 @layer base {
@@ -147,7 +150,8 @@
   }
 }
 
-/* Keyframes */
+/* ─── Keyframes ─── */
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -161,6 +165,56 @@
 @keyframes gradient-x {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
+}
+
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+}
+
+@keyframes neural-pulse {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.6;
+    border-width: 2px;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+    border-width: 1px;
+  }
+}
+
+@keyframes synapse-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes consciousness-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 30px oklch(0.72 0.16 195 / 20%),
+      0 0 60px oklch(0.72 0.16 195 / 10%),
+      inset 0 0 30px oklch(0.72 0.16 195 / 5%);
+  }
+  50% {
+    box-shadow:
+      0 0 50px oklch(0.72 0.16 195 / 30%),
+      0 0 100px oklch(0.72 0.16 195 / 15%),
+      inset 0 0 50px oklch(0.72 0.16 195 / 10%);
+  }
+}
+
+@keyframes typewriter-fade {
+  0% { opacity: 0; transform: translateY(4px); }
+  30% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes radar-sweep {
@@ -180,14 +234,20 @@
 }
 
 @keyframes orb-pulse {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 30px var(--neon-cyan), 0 0 60px oklch(0.75 0.15 200 / 20%); }
-  50% { transform: scale(1.08); box-shadow: 0 0 50px var(--neon-cyan), 0 0 100px oklch(0.75 0.15 200 / 40%); }
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 40px var(--neon-cyan), 0 0 80px oklch(0.72 0.16 195 / 15%);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 0 60px var(--neon-cyan), 0 0 120px oklch(0.72 0.16 195 / 25%);
+  }
 }
 
 @keyframes orb-listening {
   0%, 100% { transform: scale(1); }
-  25% { transform: scale(1.15) rotate(2deg); }
-  75% { transform: scale(0.95) rotate(-2deg); }
+  25% { transform: scale(1.08); }
+  75% { transform: scale(0.97); }
 }
 
 @keyframes waterfall-fill {
@@ -205,8 +265,8 @@
 }
 
 @keyframes ring-expand {
-  0% { transform: scale(0.8); opacity: 0.6; }
-  100% { transform: scale(2); opacity: 0; }
+  0% { transform: scale(0.9); opacity: 0.4; }
+  100% { transform: scale(2.5); opacity: 0; }
 }
 
 @keyframes particle-flow {
@@ -216,17 +276,20 @@
   100% { offset-distance: 100%; opacity: 0; }
 }
 
-/* Utility classes */
+/* ─── Utility Classes ─── */
+
+/* Glass panel — organic teal tint */
 .glass-panel {
   background: linear-gradient(
     135deg,
-    oklch(0.17 0.008 260 / 80%) 0%,
-    oklch(0.14 0.01 260 / 60%) 100%
+    oklch(0.14 0.012 250 / 80%) 0%,
+    oklch(0.12 0.015 220 / 60%) 100%
   );
-  backdrop-filter: blur(12px);
-  border: 1px solid oklch(1 0 0 / 6%);
+  backdrop-filter: blur(16px);
+  border: 1px solid oklch(1 0 0 / 5%);
 }
 
+/* Gradient border */
 .gradient-border {
   position: relative;
 }
@@ -236,15 +299,16 @@
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple), var(--neon-emerald));
+  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-amber), var(--neon-emerald));
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
+/* Glow variants */
 .glow-cyan {
-  box-shadow: 0 0 15px oklch(0.75 0.15 200 / 25%), 0 0 40px oklch(0.75 0.15 200 / 10%);
+  box-shadow: 0 0 15px oklch(0.72 0.16 195 / 25%), 0 0 40px oklch(0.72 0.16 195 / 10%);
 }
 
 .glow-emerald {
@@ -259,7 +323,49 @@
   box-shadow: 0 0 15px oklch(0.65 0.2 15 / 25%), 0 0 40px oklch(0.65 0.2 15 / 10%);
 }
 
-/* Animate staggered children */
+/* ─── Entity Orb — the living element ─── */
+
+.entity-orb {
+  background: radial-gradient(
+    circle at 40% 40%,
+    oklch(0.72 0.16 195 / 80%) 0%,
+    oklch(0.55 0.2 260 / 50%) 40%,
+    oklch(0.4 0.15 220 / 30%) 70%,
+    transparent 100%
+  );
+  animation: breathe 4s ease-in-out infinite, consciousness-glow 4s ease-in-out infinite;
+}
+
+.entity-orb-active {
+  background: radial-gradient(
+    circle at 40% 40%,
+    oklch(0.8 0.18 195 / 90%) 0%,
+    oklch(0.6 0.22 260 / 60%) 35%,
+    oklch(0.5 0.18 220 / 40%) 60%,
+    oklch(0.4 0.12 280 / 20%) 80%,
+    transparent 100%
+  );
+  animation: breathe 2s ease-in-out infinite, consciousness-glow 2s ease-in-out infinite;
+}
+
+.entity-orb-mini {
+  background: radial-gradient(
+    circle at 40% 40%,
+    oklch(0.72 0.16 195 / 90%) 0%,
+    oklch(0.55 0.2 260 / 50%) 60%,
+    transparent 100%
+  );
+  animation: breathe 4s ease-in-out infinite;
+}
+
+/* Consciousness level progress bar */
+.consciousness-bar {
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-amber));
+  background-size: 200% 100%;
+  animation: synapse-flow 2s linear infinite;
+}
+
+/* Stagger children entrance */
 .stagger-children > * {
   animation: scenario-stagger 0.4s ease-out both;
 }
@@ -278,7 +384,7 @@
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
-  background: linear-gradient(135deg, var(--neon-emerald), var(--neon-cyan), var(--neon-purple));
+  background: linear-gradient(135deg, var(--neon-emerald), var(--neon-cyan), var(--neon-amber));
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
@@ -298,10 +404,10 @@
 
 /* Voice orb styles */
 .voice-orb {
-  animation: orb-pulse 3s ease-in-out infinite;
+  animation: breathe 3s ease-in-out infinite, consciousness-glow 3s ease-in-out infinite;
 }
 .voice-orb.listening {
-  animation: orb-listening 0.6s ease-in-out infinite;
+  animation: orb-listening 0.6s ease-in-out infinite, consciousness-glow 1s ease-in-out infinite;
 }
 
 /* React Flow overrides */

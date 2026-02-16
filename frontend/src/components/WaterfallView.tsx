@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { TaskTrace, TraceStep } from "@/types";
+import type { TaskTrace } from "@/types";
 
 interface WaterfallViewProps {
   trace: TaskTrace;
@@ -83,7 +83,7 @@ export function WaterfallView({ trace }: WaterfallViewProps) {
           <CardTitle className="flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
             <span className="h-1.5 w-1.5 rounded-full bg-neon-purple animate-glow-pulse" />
             <span className="bg-gradient-to-r from-neon-purple to-neon-cyan bg-clip-text text-transparent">
-              Execution Timeline
+              Neural Timeline
             </span>
           </CardTitle>
           <div className="flex items-center gap-3">
@@ -104,7 +104,7 @@ export function WaterfallView({ trace }: WaterfallViewProps) {
           <div className="flex items-center gap-3 mb-1 py-1.5">
             <div className="w-28 shrink-0 flex items-center gap-2">
               <span className="text-sm">{"\u{1F9E0}"}</span>
-              <span className="text-[11px] font-medium text-muted-foreground truncate">Planning</span>
+              <span className="text-[11px] font-medium text-muted-foreground truncate">Forming intent</span>
             </div>
             <div className="flex-1 h-6 rounded bg-secondary/20 relative overflow-hidden">
               <div
@@ -122,40 +122,57 @@ export function WaterfallView({ trace }: WaterfallViewProps) {
           {bars.map(({ step, startPct, widthPct }, i) => (
             <div
               key={step.id}
-              className="flex items-center gap-3 py-1.5 group"
               style={{ animation: `float-up 0.3s ease-out ${i * 0.05}s both` }}
             >
-              {/* Label */}
-              <div className="w-28 shrink-0 flex items-center gap-2">
-                <span className="text-sm">{ACTION_ICONS[step.action] ?? "\u{2699}"}</span>
-                <div className="flex flex-col min-w-0">
-                  <span className={`text-[11px] font-medium truncate ${STATUS_COLORS[step.status] ?? "text-foreground"}`}>
-                    {step.action}
-                  </span>
-                  <span className="text-[9px] text-muted-foreground/40 truncate">{step.group}</span>
-                </div>
-              </div>
-
-              {/* Bar */}
-              <div className="flex-1 h-6 rounded bg-secondary/20 relative overflow-hidden">
-                {widthPct > 0 && (
-                  <div
-                    className={`absolute inset-y-0 rounded waterfall-bar flex items-center px-2 ${
-                      GROUP_COLORS[step.group] ?? "bg-neon-cyan/60"
-                    } ${step.status === "failed" ? "!bg-neon-rose/60" : ""}`}
-                    style={{
-                      left: `${startPct}%`,
-                      width: `${Math.max(widthPct, 3)}%`,
-                      animationDelay: `${i * 0.05}s`,
-                      opacity: step.status === "skipped" ? 0.3 : 0.7,
-                    }}
-                  >
-                    <span className="text-[9px] font-mono text-white/90 whitespace-nowrap">
-                      {step.duration_ms ? `${step.duration_ms}ms` : ""}
+              <div className="flex items-center gap-3 py-1.5 group">
+                {/* Label */}
+                <div className="w-28 shrink-0 flex items-center gap-2">
+                  <span className="text-sm">{ACTION_ICONS[step.action] ?? "\u{2699}"}</span>
+                  <div className="flex flex-col min-w-0">
+                    <span className={`text-[11px] font-medium truncate ${STATUS_COLORS[step.status] ?? "text-foreground"}`}>
+                      {step.action}
                     </span>
+                    <span className="text-[9px] text-muted-foreground/40 truncate">{step.group}</span>
                   </div>
+                </div>
+
+                {/* Bar */}
+                <div className="flex-1 h-6 rounded bg-secondary/20 relative overflow-hidden">
+                  {widthPct > 0 && (
+                    <div
+                      className={`absolute inset-y-0 rounded waterfall-bar flex items-center px-2 ${
+                        GROUP_COLORS[step.group] ?? "bg-neon-cyan/60"
+                      } ${step.status === "failed" ? "!bg-neon-rose/60" : ""}`}
+                      style={{
+                        left: `${startPct}%`,
+                        width: `${Math.max(widthPct, 3)}%`,
+                        animationDelay: `${i * 0.05}s`,
+                        opacity: step.status === "skipped" ? 0.3 : 0.7,
+                      }}
+                    >
+                      <span className="text-[9px] font-mono text-white/90 whitespace-nowrap">
+                        {step.duration_ms ? `${step.duration_ms}ms` : ""}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Retries badge */}
+                {step.retries > 0 && (
+                  <span className="shrink-0 text-[9px] text-neon-amber/60 font-mono">
+                    {step.retries}x retry
+                  </span>
                 )}
               </div>
+
+              {/* Error detail row */}
+              {step.error && (
+                <div className="ml-[124px] mb-1">
+                  <p className="text-[9px] text-neon-rose/70 bg-neon-rose/[0.06] rounded px-2 py-1 border border-neon-rose/10 line-clamp-2">
+                    {step.error}
+                  </p>
+                </div>
+              )}
             </div>
           ))}
 

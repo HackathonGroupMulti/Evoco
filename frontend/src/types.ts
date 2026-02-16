@@ -33,6 +33,7 @@ export interface TraceStep {
   duration_ms?: number;
   started_at?: string;
   finished_at?: string;
+  error?: string;
 }
 
 export interface TaskTrace {
