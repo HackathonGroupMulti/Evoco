@@ -7,8 +7,9 @@ from backend.services.task_store import TaskStore
 
 
 @pytest.fixture
-def store() -> TaskStore:
-    """Fresh in-memory store (no Redis in test env)."""
+def store(monkeypatch: pytest.MonkeyPatch) -> TaskStore:
+    """Fresh in-memory store — force memory backend even when Redis is available."""
+    monkeypatch.setattr("backend.services.task_store.settings.redis_url", "")
     return TaskStore()
 
 
