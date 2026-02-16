@@ -24,6 +24,51 @@ export function useTaskRunner(): UseTaskRunnerReturn {
   const [trace, setTrace] = useState<TaskTrace | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
+  const handleEvent = useCallback((event: WSEvent) => {
+    switch (event.event) {
+      case "planning_reasoning":
+        setReasoning(event.data.text as string);
+        break;
+      case "plan_ready": {
+        const planSteps = (event.data.steps as TaskStep[]) ?? [];
+        setSteps(planSteps.map((s) => ({ ...s, status: "pending" })));
+        break;
+      }
+      case "step_started":
+        setSteps((prev) =>
+          prev.map((s) =>
+            s.id === event.data.step_id ? { ...s, status: "running" } : s
+          )
+        );
+        break;
+      case "step_completed":
+        setSteps((prev) =>
+          prev.map((s) =>
+            s.id === event.data.step_id
+              ? { ...s, status: "completed", result: event.data.result as Record<string, unknown> }
+              : s
+          )
+        );
+        setCompletedCount((c) => c + 1);
+        break;
+      case "step_failed":
+        setSteps((prev) =>
+          prev.map((s) =>
+            s.id === event.data.step_id
+              ? { ...s, status: "failed", error: event.data.error as string }
+              : s
+          )
+        );
+        setCompletedCount((c) => c + 1);
+        break;
+      case "task_done":
+        if (event.data.trace) {
+          setTrace(event.data.trace as TaskTrace);
+        }
+        break;
+    }
+  }, []);
+
   const runTask = useCallback((command: string, outputFormat: OutputFormat) => {
     // Reset state
     setSteps([]);
@@ -70,52 +115,7 @@ export function useTaskRunner(): UseTaskRunnerReturn {
     ws.onclose = () => {
       wsRef.current = null;
     };
-  }, []);
-
-  function handleEvent(event: WSEvent) {
-    switch (event.event) {
-      case "planning_reasoning":
-        setReasoning(event.data.text as string);
-        break;
-      case "plan_ready": {
-        const planSteps = (event.data.steps as TaskStep[]) ?? [];
-        setSteps(planSteps.map((s) => ({ ...s, status: "pending" })));
-        break;
-      }
-      case "step_started":
-        setSteps((prev) =>
-          prev.map((s) =>
-            s.id === event.data.step_id ? { ...s, status: "running" } : s
-          )
-        );
-        break;
-      case "step_completed":
-        setSteps((prev) =>
-          prev.map((s) =>
-            s.id === event.data.step_id
-              ? { ...s, status: "completed", result: event.data.result as Record<string, unknown> }
-              : s
-          )
-        );
-        setCompletedCount((c) => c + 1);
-        break;
-      case "step_failed":
-        setSteps((prev) =>
-          prev.map((s) =>
-            s.id === event.data.step_id
-              ? { ...s, status: "failed", error: event.data.error as string }
-              : s
-          )
-        );
-        setCompletedCount((c) => c + 1);
-        break;
-      case "task_done":
-        if (event.data.trace) {
-          setTrace(event.data.trace as TaskTrace);
-        }
-        break;
-    }
-  }
+  }, [handleEvent]);
 
   return { connectionState, steps, result, error, completedCount, reasoning, trace, runTask };
 }

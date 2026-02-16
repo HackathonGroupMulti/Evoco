@@ -19,6 +19,7 @@ export default function App() {
   const [hasStarted, setHasStarted] = useState(false);
   const [showWaterfall, setShowWaterfall] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [lastAddedTaskId, setLastAddedTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/health")
@@ -27,15 +28,16 @@ export default function App() {
       .catch(() => setMode("unknown"));
   }, []);
 
-  useEffect(() => {
-    if (result && result.status === "completed") {
-      setHistory((prev) => {
-        if (prev.some((t) => t.task_id === result.task_id)) return prev;
-        return [result, ...prev];
-      });
-      setSelectedResult(null);
-    }
-  }, [result]);
+  // Add completed results to history during render (avoids setState-in-effect)
+  if (
+    result &&
+    result.status === "completed" &&
+    result.task_id !== lastAddedTaskId
+  ) {
+    setLastAddedTaskId(result.task_id);
+    setHistory((prev) => [result, ...prev]);
+    setSelectedResult(null);
+  }
 
   const handleSubmit = useCallback(
     (command: string, format: OutputFormat) => {
