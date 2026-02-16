@@ -17,6 +17,18 @@ _skip_live = pytest.mark.skipif(
 
 @pytest_asyncio.fixture
 async def client():
+    # Raise rate limits so tests don't hit 429s
+    settings.max_tasks_per_minute = 1000
+    settings.max_concurrent_tasks = 100
+
+    # Clear any existing rate limiter buckets from prior tests
+    layer = app.middleware_stack
+    while layer is not None:
+        if hasattr(layer, "_buckets"):
+            layer._buckets.clear()
+            break
+        layer = getattr(layer, "app", None)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
