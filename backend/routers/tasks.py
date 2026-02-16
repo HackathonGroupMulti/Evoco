@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from backend.middleware.auth import User, get_optional_user

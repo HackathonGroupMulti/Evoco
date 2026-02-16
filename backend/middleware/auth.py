@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import jwt
-from fastapi import Depends, HTTPException, Request, WebSocket
+from fastapi import Depends, HTTPException, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 

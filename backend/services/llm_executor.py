@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
-from backend.config import settings
 from backend.models.task import TaskStep
 from backend.services.cost import estimate_llm_cost
 from backend.services.result_parser import parse_result

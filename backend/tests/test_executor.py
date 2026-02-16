@@ -1,7 +1,5 @@
 """Tests for the executor service."""
 
-import pytest
-
 from backend.models.task import TaskStep
 from backend.services.executor import _mock_result_for_step
 

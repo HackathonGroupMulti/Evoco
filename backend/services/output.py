@@ -108,7 +108,8 @@ def _stringify(val: Any) -> str:
     return str(val)
 
 
-_PRODUCT_SORT_KEY = lambda p: (-p.get("rating", 0), p.get("price", 0))
+def _product_sort_key(p: dict) -> tuple:
+    return (-p.get("rating", 0), p.get("price", 0))
 
 
 def format_output(plan: TaskPlan, fmt: OutputFormat) -> Any:
@@ -117,7 +118,7 @@ def format_output(plan: TaskPlan, fmt: OutputFormat) -> Any:
     summary = _get_summary_text(plan)
 
     # Sort once — O(n log n) — reused by all formatters
-    sorted_products = sorted(products, key=_PRODUCT_SORT_KEY) if products else []
+    sorted_products = sorted(products, key=_product_sort_key) if products else []
 
     if fmt == OutputFormat.JSON:
         return _as_json(plan, sorted_products, summary)

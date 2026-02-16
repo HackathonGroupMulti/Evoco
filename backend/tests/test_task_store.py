@@ -32,7 +32,7 @@ def test_get_returns_none_for_unknown(store: TaskStore) -> None:
 
 def test_list_tasks_returns_newest_first(store: TaskStore) -> None:
     t1 = store.new_task("first", OutputFormat.JSON)
-    t2 = store.new_task("second", OutputFormat.JSON)
+    store.new_task("second", OutputFormat.JSON)
     t3 = store.new_task("third", OutputFormat.JSON)
 
     tasks = store.list_tasks(limit=10)

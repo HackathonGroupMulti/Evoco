@@ -1,9 +1,6 @@
 """Tests for the planner service."""
 
-import pytest
-
 from backend.services.planner import _mock_plan, _steps_from_raw
-from backend.models.task import TaskStep
 
 
 class TestMockPlan:
