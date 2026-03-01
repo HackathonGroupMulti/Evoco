@@ -52,10 +52,62 @@ class TokenResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory user store (swap for DB in production)
+# Persistent user store (Redis-backed, in-memory fallback)
 # ---------------------------------------------------------------------------
 
-_users: dict[str, dict[str, Any]] = {}  # email -> {password_hash, user_id, ...}
+_USER_TTL = 365 * 24 * 60 * 60  # 1 year TTL for user records in Redis
+
+
+class _UserStore:
+    """Redis-backed user store with in-memory fallback.
+
+    Keys: ``user:{email}`` → JSON ``{user_id, password_hash, created_at}``
+    Falls back to a plain dict when Redis is unavailable.
+    """
+
+    def __init__(self) -> None:
+        self._mem: dict[str, dict[str, Any]] = {}
+        self._redis: Any = None
+        self._connect()
+
+    def _connect(self) -> None:
+        if not settings.redis_url:
+            return
+        try:
+            import redis as _redis
+            client = _redis.from_url(settings.redis_url, decode_responses=True)
+            client.ping()
+            self._redis = client
+            import logging as _logging
+            _logging.getLogger(__name__).info("UserStore connected to Redis")
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "UserStore Redis unavailable (%s), using in-memory fallback", exc
+            )
+
+    def get(self, email: str) -> dict[str, Any] | None:
+        if self._redis:
+            raw = self._redis.get(f"user:{email}")
+            if raw:
+                import json
+                return json.loads(raw)
+            return None
+        return self._mem.get(email)
+
+    def set(self, email: str, data: dict[str, Any]) -> None:
+        if self._redis:
+            import json
+            self._redis.set(f"user:{email}", json.dumps(data), ex=_USER_TTL)
+        self._mem[email] = data
+
+    def exists(self, email: str) -> bool:
+        if self._redis:
+            return bool(self._redis.exists(f"user:{email}"))
+        return email in self._mem
+
+
+_user_store = _UserStore()
 
 
 def _hash_password(password: str) -> str:
@@ -175,15 +227,15 @@ def register_user(email: str, password: str) -> tuple[str, str]:
     """
     import uuid
 
-    if email in _users:
+    if _user_store.exists(email):
         raise HTTPException(status_code=409, detail="Email already registered")
 
     user_id = uuid.uuid4().hex[:12]
-    _users[email] = {
+    _user_store.set(email, {
         "user_id": user_id,
         "password_hash": _hash_password(password),
         "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+    })
 
     token = create_token(user_id, email)
     logger.info("User registered: %s (%s)", email, user_id)
@@ -195,7 +247,7 @@ def login_user(email: str, password: str) -> tuple[str, str]:
 
     Raises HTTPException on invalid credentials.
     """
-    user_data = _users.get(email)
+    user_data = _user_store.get(email)
     if not user_data or not _verify_password(password, user_data["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 

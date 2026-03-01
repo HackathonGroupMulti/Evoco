@@ -1,8 +1,13 @@
 """Token-bucket rate limiter middleware.
 
 Implements a per-client token bucket algorithm with configurable
-burst capacity and refill rate. Clients are identified by IP address
-(or X-Forwarded-For behind a reverse proxy).
+burst capacity and refill rate.
+
+Client identity:
+  - Authenticated requests (Bearer JWT present): keyed by ``user:{user_id}``
+    so the limit applies per user regardless of IP.
+  - Anonymous requests: keyed by IP address (or X-Forwarded-For behind a
+    reverse proxy).
 
 Rate limit headers follow the IETF draft standard (RateLimit-*).
 """
@@ -10,6 +15,8 @@ Rate limit headers follow the IETF draft standard (RateLimit-*).
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -21,6 +28,27 @@ from starlette.responses import JSONResponse
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _user_id_from_bearer(auth_header: str | None) -> str | None:
+    """Extract the ``sub`` claim from a Bearer JWT without signature verification.
+
+    Used only to derive a stable rate-limit key — the auth middleware
+    still validates the token fully on protected routes.
+    Returns None if the header is absent, malformed, or missing ``sub``.
+    """
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    parts = auth_header[7:].split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        # JWT payload is Base64url-encoded; pad to a multiple of 4
+        padded = parts[1] + "=="
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        return payload.get("sub") or None
+    except Exception:
+        return None
 
 
 @dataclass
@@ -79,15 +107,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._cleanup_interval = cleanup_interval
         self._last_cleanup = time.monotonic()
 
-    def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP, respecting X-Forwarded-For behind proxies."""
+    def _get_client_key(self, request: Request) -> str:
+        """Return a stable rate-limit key for this request.
+
+        Authenticated requests use ``user:{user_id}`` so the limit is
+        per-user regardless of which IP they connect from.
+        Anonymous requests fall back to IP address.
+        """
+        user_id = _user_id_from_bearer(request.headers.get("authorization"))
+        if user_id:
+            return f"user:{user_id}"
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
             return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
 
-    async def _get_bucket(self, client_ip: str) -> TokenBucket:
-        """Get or create a token bucket for a client."""
+    async def _get_bucket(self, client_key: str) -> TokenBucket:
+        """Get or create a token bucket for a client key."""
         async with self._lock:
             # Periodic cleanup of stale buckets
             now = time.monotonic()
@@ -95,12 +131,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 self._cleanup_stale(now)
                 self._last_cleanup = now
 
-            if client_ip not in self._buckets:
-                self._buckets[client_ip] = TokenBucket(
+            if client_key not in self._buckets:
+                self._buckets[client_key] = TokenBucket(
                     capacity=float(settings.max_concurrent_tasks),
                     refill_rate=settings.max_tasks_per_minute / 60.0,
                 )
-            return self._buckets[client_ip]
+            return self._buckets[client_key]
 
     def _cleanup_stale(self, now: float) -> None:
         """Remove buckets that haven't been used in 10 minutes."""
@@ -119,7 +155,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in self.EXEMPT_PREFIXES):
             return await call_next(request)
 
-        client_ip = self._get_client_ip(request)
+        client_ip = self._get_client_key(request)
         bucket = await self._get_bucket(client_ip)
 
         if not bucket.consume():

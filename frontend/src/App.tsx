@@ -11,7 +11,7 @@ import { useTaskRunner } from "@/hooks/useTaskRunner";
 import type { HealthResponse, OutputFormat, TaskResult } from "@/types";
 
 export default function App() {
-  const { connectionState, steps, result, completedCount, reasoning, trace, runTask } =
+  const { connectionState, steps, result, completedCount, reasoning, trace, runTask, cancelTask } =
     useTaskRunner();
   const [history, setHistory] = useState<TaskResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<TaskResult | null>(null);
@@ -159,6 +159,7 @@ export default function App() {
         <div className="w-72 shrink-0">
           <CommandPanel
             onSubmit={handleSubmit}
+            onCancel={cancelTask}
             connectionState={connectionState}
             history={history}
             onSelectHistory={handleSelectHistory}

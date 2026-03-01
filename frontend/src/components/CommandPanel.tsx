@@ -11,6 +11,7 @@ import type { ConnectionState } from "@/hooks/useTaskRunner";
 
 interface CommandPanelProps {
   onSubmit: (command: string, format: OutputFormat) => void;
+  onCancel: () => Promise<void>;
   connectionState: ConnectionState;
   history: TaskResult[];
   onSelectHistory: (task: TaskResult) => void;
@@ -30,6 +31,7 @@ const QUICK_ACTIONS = [
 
 export function CommandPanel({
   onSubmit,
+  onCancel,
   connectionState,
   history,
   onSelectHistory,
@@ -38,6 +40,7 @@ export function CommandPanel({
   const [format, setFormat] = useState<OutputFormat>("summary");
 
   const isRunning = connectionState === "connecting" || connectionState === "running";
+  const isDisconnected = connectionState === "disconnected";
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -104,25 +107,48 @@ export function CommandPanel({
             ))}
           </div>
 
-          <Button
-            type="submit"
-            disabled={isRunning || !command.trim()}
-            className="w-full bg-gradient-to-r from-neon-cyan to-neon-purple text-white font-semibold hover:from-neon-cyan/90 hover:to-neon-purple/90 transition-all duration-300 hover:shadow-[0_0_20px_rgba(6,182,212,0.3)] disabled:opacity-40 disabled:hover:shadow-none"
-          >
-            {isRunning ? (
-              <span className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full border-2 border-white/70 border-t-transparent" style={{ animation: "breathe 1.5s ease-in-out infinite" }} />
-                Thinking...
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
+          <div className="flex gap-2">
+            <Button
+              type="submit"
+              disabled={isRunning || !command.trim()}
+              className="flex-1 bg-gradient-to-r from-neon-cyan to-neon-purple text-white font-semibold hover:from-neon-cyan/90 hover:to-neon-purple/90 transition-all duration-300 hover:shadow-[0_0_20px_rgba(6,182,212,0.3)] disabled:opacity-40 disabled:hover:shadow-none"
+            >
+              {isRunning ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full border-2 border-white/70 border-t-transparent" style={{ animation: "breathe 1.5s ease-in-out infinite" }} />
+                  Thinking...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                  </svg>
+                  Ask Evoco
+                </span>
+              )}
+            </Button>
+
+            {isRunning && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onCancel}
+                className="shrink-0 border-neon-rose/40 text-neon-rose hover:bg-neon-rose/10 hover:border-neon-rose/60 transition-all"
+                title="Cancel task"
+              >
                 <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
                 </svg>
-                Ask Evoco
-              </span>
+              </Button>
             )}
-          </Button>
+          </div>
+
+          {/* Disconnection banner */}
+          {isDisconnected && (
+            <div className="rounded-md border border-neon-amber/30 bg-neon-amber/[0.08] px-3 py-2 text-xs text-neon-amber">
+              Connection lost. The task may still be running in the background. Submit a new command to start fresh.
+            </div>
+          )}
         </form>
 
         <Separator className="bg-gradient-to-r from-transparent via-border to-transparent" />

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     max_concurrent_browsers: int = 3
     browser_timeout_seconds: int = 60
 
+    # Pipeline
+    pipeline_timeout_seconds: int = 300  # 5-minute hard cap per task
+
     # Rate limits
     max_tasks_per_minute: int = 10
     max_concurrent_tasks: int = 5

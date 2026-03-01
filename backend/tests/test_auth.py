@@ -5,7 +5,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 from backend.main import app
-from backend.middleware.auth import _users
+from backend.middleware.auth import _user_store
 
 
 @pytest_asyncio.fixture
@@ -17,10 +17,10 @@ async def client():
 
 @pytest_asyncio.fixture(autouse=True)
 async def clear_users():
-    """Clear user store between tests."""
-    _users.clear()
+    """Clear in-memory user store between tests."""
+    _user_store._mem.clear()
     yield
-    _users.clear()
+    _user_store._mem.clear()
 
 
 @pytest.mark.asyncio

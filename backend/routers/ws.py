@@ -15,6 +15,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend.config import settings
 from backend.models.task import OutputFormat, WSEvent
 from backend.orchestrator.pipeline import run_task
 from backend.services.voice import VoiceStream
@@ -98,7 +99,20 @@ async def ws_run_task(ws: WebSocket) -> None:
             except Exception:
                 pass
 
-        result = await run_task(command, output_format, on_event=_broadcast)
+        try:
+            result = await asyncio.wait_for(
+                run_task(command, output_format, on_event=_broadcast),
+                timeout=settings.pipeline_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Pipeline timed out after %ds for command: %s",
+                settings.pipeline_timeout_seconds, command,
+            )
+            await ws.send_text(json.dumps({
+                "error": f"Task timed out after {settings.pipeline_timeout_seconds}s",
+            }))
+            return
 
         # Send the final result
         await ws.send_text(result.model_dump_json())
@@ -213,7 +227,7 @@ async def ws_voice_stream(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("Voice WebSocket client disconnected")
         if stream and stream._started:
-            await stream.finish()
+            await stream.cancel()  # cancel (not finish) — client is gone
     except Exception as exc:
         logger.exception("Voice WebSocket error")
         try:
