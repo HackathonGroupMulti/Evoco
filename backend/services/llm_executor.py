@@ -12,7 +12,7 @@ from typing import Any
 
 from backend.models.task import TaskStep
 from backend.services.cost import estimate_llm_cost
-from backend.services.result_parser import parse_result
+from backend.services.result_parser import parse_result_async
 
 logger = logging.getLogger(__name__)
 
@@ -77,20 +77,19 @@ async def execute_with_llm(step: TaskStep, context: list[dict[str, Any]]) -> dic
     """
     import asyncio
 
-    def _run() -> dict[str, Any]:
-        system_prompt = _SYSTEM_PROMPTS.get(step.action, _DEFAULT_SYSTEM)
-        user_prompt = (
-            f"Task: {step.description}\n\n"
-            f"Data from prior steps:\n{json.dumps(context, indent=2, default=str)}"
-        )
+    system_prompt = _SYSTEM_PROMPTS.get(step.action, _DEFAULT_SYSTEM)
+    user_prompt = (
+        f"Task: {step.description}\n\n"
+        f"Data from prior steps:\n{json.dumps(context, indent=2, default=str)}"
+    )
 
+    def _call_bedrock() -> str:
         client = _build_bedrock_client()
         body = {
             "messages": [{"role": "user", "content": [{"text": user_prompt}]}],
             "system": [{"text": system_prompt}],
             "inferenceConfig": {"maxTokens": 2048, "temperature": 0.2},
         }
-
         response = client.invoke_model(
             modelId=NOVA_MODEL_ID,
             contentType="application/json",
@@ -98,20 +97,21 @@ async def execute_with_llm(step: TaskStep, context: list[dict[str, Any]]) -> dic
             body=json.dumps(body),
         )
         raw = json.loads(response["body"].read())
-        text = raw["output"]["message"]["content"][0]["text"]
+        return raw["output"]["message"]["content"][0]["text"]
 
-        # Parse the response using multi-strategy parser
-        parsed = parse_result(text)
+    # Bedrock invoke_model is blocking — run it in a thread
+    text = await asyncio.to_thread(_call_bedrock)
 
-        return {
-            "success": True,
-            "response": parsed,
-            "raw_text": text,
-            "cost_usd": estimate_llm_cost(user_prompt, text),
-            "executor": "llm",
-        }
+    # parse_result_async handles strategy 4 (LLM repair) without blocking the loop
+    parsed = await parse_result_async(text)
 
-    return await asyncio.to_thread(_run)
+    return {
+        "success": True,
+        "response": parsed,
+        "raw_text": text,
+        "cost_usd": estimate_llm_cost(user_prompt, text),
+        "executor": "llm",
+    }
 
 
 async def mock_llm_execute(step: TaskStep, context: list[dict[str, Any]]) -> dict[str, Any]:

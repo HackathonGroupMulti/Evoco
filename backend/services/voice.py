@@ -112,7 +112,20 @@ class VoiceStream:
 
         # Signal end of audio and get final text
         final = await stream.finish()
+
+        # Always call cancel() if the WebSocket closes unexpectedly
+        await stream.cancel()
+
+    Implementation note:
+        Uses a chunked-batch approach — collects audio in a buffer and
+        transcribes every N chunks for progress updates, then runs a
+        final transcription over all accumulated audio.  A future
+        upgrade would use true bidirectional streaming with the Bedrock
+        streaming SDK for word-level real-time output.
     """
+
+    _PARTIAL_INTERVAL = 10   # transcribe every N chunks for partial updates
+    _CHUNK_TIMEOUT_S  = 30.0 # max seconds to wait for next chunk before giving up
 
     def __init__(self, sample_rate: int = 16000, encoding: str = "pcm") -> None:
         self.sample_rate = sample_rate
@@ -121,23 +134,27 @@ class VoiceStream:
         self._partial_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._final_text: str = ""
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
         self._started = False
+        self._cancelled = False
         self._chunks_received = 0
 
     async def start(self) -> None:
         """Start the streaming transcription session."""
         self._started = True
-        self._task = asyncio.create_task(self._stream_loop())
+        self._task = asyncio.create_task(self._stream_loop(), name="voice-stream")
         logger.info("Voice stream started (sample_rate=%d)", self.sample_rate)
 
     async def feed(self, audio_chunk: bytes) -> None:
         """Feed an audio chunk into the stream.
 
         Call this each time a new audio chunk arrives from the WebSocket.
+        Raises RuntimeError if the stream was never started or was cancelled.
         """
         if not self._started:
             raise RuntimeError("VoiceStream not started — call start() first")
+        if self._cancelled:
+            raise RuntimeError("VoiceStream was cancelled")
         self._chunks_received += 1
         await self._audio_queue.put(audio_chunk)
 
@@ -145,6 +162,7 @@ class VoiceStream:
         """Yield partial transcripts as they become available.
 
         Yields strings until the stream is finished (signaled by None sentinel).
+        Stops early if the stream is cancelled.
         """
         while True:
             partial = await self._partial_queue.get()
@@ -155,12 +173,18 @@ class VoiceStream:
     async def finish(self) -> str:
         """Signal end of audio and return the final transcript.
 
-        Call this when the user stops speaking or the WebSocket closes.
+        Call this when the user stops speaking or the WebSocket closes cleanly.
+        Safe to call even if the stream loop has already exited due to a timeout.
         """
-        await self._audio_queue.put(None)  # sentinel to stop the stream loop
+        if not self._cancelled:
+            await self._audio_queue.put(None)  # sentinel to stop the stream loop
 
-        if self._task:
-            await self._task
+        if self._task and not self._task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self._task), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("Voice stream loop did not finish within 10s; cancelling")
+                await self.cancel()
 
         logger.info(
             "Voice stream finished: %d chunks -> '%s' (%d chars)",
@@ -168,51 +192,57 @@ class VoiceStream:
         )
         return self._final_text
 
-    async def _stream_loop(self) -> None:
-        """Background task: collect audio chunks and stream to Nova Sonic.
+    async def cancel(self) -> None:
+        """Cancel the stream immediately (e.g. on WebSocket disconnect).
 
-        For the hackathon, this uses a chunked-batch approach:
-        - Collect audio in a buffer
-        - Every N chunks, run a partial transcription
-        - Final transcription on all accumulated audio when stream ends
-
-        A production system would use true bidirectional streaming with
-        the Bedrock streaming SDK for word-level real-time output.
+        Safe to call multiple times. After cancellation ``finish()`` returns
+        whatever text was accumulated before the cancel.
         """
+        if self._cancelled:
+            return
+        self._cancelled = True
+
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        # Drain the partial queue so any concurrent ``transcripts()`` caller exits
+        await self._partial_queue.put(None)
+        logger.info("Voice stream cancelled after %d chunks", self._chunks_received)
+
+    async def _stream_loop(self) -> None:
+        """Background task: collect audio chunks and transcribe to text."""
         try:
             audio_buf = bytearray()  # O(1) amortised append vs O(n) join
             chunk_count = 0
-            partial_interval = 10  # transcribe every N chunks for partial updates
 
             while True:
-                chunk = await self._audio_queue.get()
+                # Enforce per-chunk timeout so the loop doesn't hang forever
+                # if the client stops sending audio without calling finish().
+                try:
+                    chunk = await asyncio.wait_for(
+                        self._audio_queue.get(), timeout=self._CHUNK_TIMEOUT_S
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Voice stream: no audio chunk received for %.0fs, finalising",
+                        self._CHUNK_TIMEOUT_S,
+                    )
+                    break  # treat as end-of-stream
+
                 if chunk is None:
-                    break
+                    break  # explicit finish() sentinel
 
                 audio_buf.extend(chunk)
                 chunk_count += 1
 
-                # Emit progress indicator
-                if chunk_count % partial_interval == 0 and settings.has_aws_credentials:
-                    # Run partial transcription on accumulated audio
-                    try:
-                        partial_text = await transcribe(
-                            bytes(audio_buf), self.sample_rate, self.encoding
-                        )
-                        if partial_text and partial_text != _mock_transcription():
-                            self._transcript_parts.append(partial_text)
-                            await self._partial_queue.put(partial_text)
-                    except Exception as exc:
-                        logger.debug("Partial transcription failed: %s", exc)
-                elif chunk_count % partial_interval == 0:
-                    # Mock mode: emit progress updates
-                    mock_words = _mock_transcription().split()
-                    progress = min(chunk_count // partial_interval, len(mock_words))
-                    partial = " ".join(mock_words[:progress])
-                    if partial:
-                        await self._partial_queue.put(partial)
+                if chunk_count % self._PARTIAL_INTERVAL == 0:
+                    await self._emit_partial(audio_buf)
 
-            # Final transcription on full audio
+            # Final transcription on all accumulated audio
             if audio_buf:
                 self._final_text = await transcribe(
                     bytes(audio_buf), self.sample_rate, self.encoding
@@ -223,11 +253,38 @@ class VoiceStream:
 
             await self._partial_queue.put(None)  # signal done
 
+        except asyncio.CancelledError:
+            logger.debug("Voice stream loop cancelled")
+            await self._partial_queue.put(None)
+            raise
+
         except Exception as exc:
             logger.error("Voice stream error: %s", exc)
             self._final_text = _mock_transcription()
             await self._partial_queue.put(self._final_text)
             await self._partial_queue.put(None)
+
+    async def _emit_partial(self, audio_buf: bytearray) -> None:
+        """Run a partial transcription and push the result to the queue."""
+        if settings.has_aws_credentials:
+            try:
+                partial_text = await transcribe(
+                    bytes(audio_buf), self.sample_rate, self.encoding
+                )
+                if partial_text and partial_text != _mock_transcription():
+                    self._transcript_parts.append(partial_text)
+                    await self._partial_queue.put(partial_text)
+            except Exception as exc:
+                logger.debug("Partial transcription failed: %s", exc)
+        else:
+            # Mock mode: reveal words progressively
+            mock_words = _mock_transcription().split()
+            revealed = min(
+                len(self._transcript_parts) + 1, len(mock_words)
+            )
+            partial = " ".join(mock_words[:revealed])
+            if partial:
+                await self._partial_queue.put(partial)
 
 
 def _mock_transcription() -> str:
