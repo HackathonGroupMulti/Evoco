@@ -102,7 +102,7 @@ async def _execute_with_nova_act(step: TaskStep, pool: Any = None) -> dict[str, 
     """
     from nova_act import NovaAct  # type: ignore[import-untyped]
 
-    schema = schema_for_action(step.action)
+    schema = schema_for_action(step.action, target=step.target, description=step.description)
     prompt = _build_browser_prompt(step)
 
     logger.info("Nova Act prompt for step %s: %s", step.id, prompt)

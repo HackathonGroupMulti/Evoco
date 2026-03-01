@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.logging_config import setup_logging
 from backend.middleware.rate_limit import RateLimitMiddleware
-from backend.routers import auth, logs, tasks, voice, ws
+from backend.routers import auth, logs, metrics, tasks, voice, ws
 from backend.services import log_store
 from backend.telemetry import instrument_fastapi
 
@@ -75,6 +75,7 @@ app.include_router(tasks.router)
 app.include_router(voice.router)
 app.include_router(ws.router)
 app.include_router(logs.router)
+app.include_router(metrics.router)
 
 
 @app.get("/api/health")

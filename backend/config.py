@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Persistence (Redis)
     redis_url: str = ""
 
+    # Result cache
+    result_cache_ttl_seconds: int = 3600  # 1-hour TTL; set to 0 to disable
+
     # Auth
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"

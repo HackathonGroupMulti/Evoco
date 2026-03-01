@@ -28,6 +28,8 @@ from backend.orchestrator.dag import DAGExecutor
 from backend.services.browser_pool import BrowserPool
 from backend.services.output import format_output
 from backend.services.planner import create_plan, replan
+from backend.services.metrics import ACTIVE_TASKS, REPLAN_COUNTER, TASK_CACHE_COUNTER, TASK_COUNTER, TASK_DURATION
+from backend.services.result_cache import get_cached, set_cached
 from backend.services.task_store import TaskStore
 
 logger = logging.getLogger(__name__)
@@ -74,11 +76,20 @@ async def run_task(
     Args:
         task_id: Optional pre-created task ID to reuse (avoids duplicate creation).
     """
+    # ---- Cache Check ----
+    cached = get_cached(command, output_format.value)
+    if cached is not None:
+        logger.info("Cache HIT for command: %.80s", command)
+        TASK_CACHE_COUNTER.labels(result="hit").inc()
+        return TaskResult.model_validate(cached)
+    TASK_CACHE_COUNTER.labels(result="miss").inc()
+
     task = store.get(task_id) if task_id else None
     if task is None:
         task = store.new_task(command, output_format)
     task_id = task.task_id
     pool = BrowserPool()
+    ACTIVE_TASKS.inc()
 
     try:
         # ---- Stage 1: Planning ----
@@ -124,15 +135,23 @@ async def run_task(
         # ---- Stage 3: Degradation Check ----
         has_completed = summary["completed"] > 0
         all_failed = summary["completed"] == 0 and summary["failed"] > 0
+        # Also replan when failures outnumber or equal successes (majority-failure)
+        majority_failed = (
+            summary["failed"] > 0
+            and summary["failed"] >= summary["completed"]
+            and summary["total"] > 1
+        )
 
-        if all_failed:
+        if all_failed or majority_failed:
+            replan_reason = "all branches failed" if all_failed else "majority of branches failed"
             # Adaptive re-planning: ask Nova 2 Lite for alternative approach
+            REPLAN_COUNTER.labels(reason="all_failed" if all_failed else "majority_failed").inc()
             task.status = TaskStatus.REPLANNING
             await on_event(WSEvent(
                 task_id=task_id,
                 event="replanning",
                 data={
-                    "reason": "all branches failed",
+                    "reason": replan_reason,
                     "failed_ids": summary["failed_ids"],
                 },
             ))
@@ -217,7 +236,21 @@ async def run_task(
         ))
 
     finally:
+        ACTIVE_TASKS.dec()
+        if task.finished_at and task.created_at:
+            TASK_DURATION.observe(
+                (task.finished_at - task.created_at).total_seconds()
+            )
+        TASK_COUNTER.labels(status=task.status.value).inc()
         await pool.shutdown()
+
+    # Persist result in cache when task completed (or partial)
+    from backend.models.task import TaskStatus as _TS
+    if task.status in (_TS.COMPLETED, _TS.PARTIAL):
+        try:
+            set_cached(command, output_format.value, task.model_dump_json())
+        except Exception as _exc:
+            logger.debug("Cache set failed: %s", _exc)
 
     return task
 
