@@ -7,10 +7,13 @@ import { LandingHero } from "@/components/LandingHero";
 import { ThinkingOverlay } from "@/components/ThinkingOverlay";
 import { WaterfallView } from "@/components/WaterfallView";
 import { LogPanel } from "@/components/LogPanel";
+import { AuthPage } from "@/components/AuthPage";
 import { useTaskRunner } from "@/hooks/useTaskRunner";
+import { useAuth } from "@/hooks/useAuth";
 import type { HealthResponse, OutputFormat, TaskResult } from "@/types";
 
 export default function App() {
+  const { isAuthenticated, user, token, login, register, logout } = useAuth();
   const { connectionState, steps, result, completedCount, reasoning, trace, runTask, cancelTask } =
     useTaskRunner();
   const [history, setHistory] = useState<TaskResult[]>([]);
@@ -22,7 +25,8 @@ export default function App() {
   const [lastAddedTaskId, setLastAddedTaskId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/health")
+    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch("/api/health", { headers: authHeaders })
       .then((r) => r.json())
       .then((data: HealthResponse) => setMode(data.mode))
       .catch(() => setMode("unknown"));
@@ -44,7 +48,7 @@ export default function App() {
       setSelectedResult(null);
       setHasStarted(true);
       setShowWaterfall(false);
-      runTask(command, format);
+      runTask(command, format, token);
     },
     [runTask]
   );
@@ -57,6 +61,11 @@ export default function App() {
   const displayResult = selectedResult ?? result;
   const isRunning = connectionState === "connecting" || connectionState === "running";
   const showThinking = isRunning && steps.length === 0;
+
+  // Auth gate
+  if (!isAuthenticated) {
+    return <AuthPage onLogin={login} onRegister={register} />;
+  }
 
   // Landing page when no task has started
   if (!hasStarted) {
@@ -98,6 +107,20 @@ export default function App() {
             </span>
           </h1>
         </div>
+
+        {/* User + logout */}
+        {user && (
+          <div className="relative flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground/50 hidden sm:block">{user.email}</span>
+            <button
+              onClick={logout}
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground/60 hover:text-neon-rose hover:bg-neon-rose/[0.08] transition-all"
+              title="Sign out"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
 
         {/* Graph/Waterfall toggle */}
         {(steps.length > 0 || trace) && (

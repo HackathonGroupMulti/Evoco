@@ -12,7 +12,7 @@ interface UseTaskRunnerReturn {
   completedCount: number;
   reasoning: string | null;
   trace: TaskTrace | null;
-  runTask: (command: string, outputFormat: OutputFormat) => void;
+  runTask: (command: string, outputFormat: OutputFormat, token?: string | null) => void;
   cancelTask: () => Promise<void>;
 }
 
@@ -26,6 +26,7 @@ export function useTaskRunner(): UseTaskRunnerReturn {
   const [reasoning, setReasoning] = useState<string | null>(null);
   const [trace, setTrace] = useState<TaskTrace | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const tokenRef = useRef<string | null>(null);
   const taskIdRef = useRef<string | null>(null);
   // Track whether the socket was closed on purpose so onclose can tell
   // an intentional close apart from an unexpected network disconnect.
@@ -95,7 +96,9 @@ export function useTaskRunner(): UseTaskRunnerReturn {
     const tid = taskIdRef.current;
     if (tid) {
       try {
-        await fetch(`/api/tasks/${tid}/cancel`, { method: "POST" });
+        const headers: Record<string, string> = {};
+        if (tokenRef.current) headers["Authorization"] = `Bearer ${tokenRef.current}`;
+        await fetch(`/api/tasks/${tid}/cancel`, { method: "POST", headers });
       } catch {
         // Ignore — the pipeline will time out on its own
       }
@@ -105,7 +108,8 @@ export function useTaskRunner(): UseTaskRunnerReturn {
     setError(null);
   }, []);
 
-  const runTask = useCallback((command: string, outputFormat: OutputFormat) => {
+  const runTask = useCallback((command: string, outputFormat: OutputFormat, token?: string | null) => {
+    tokenRef.current = token ?? null;
     // Reset all state
     setSteps([]);
     setResult(null);
@@ -127,7 +131,10 @@ export function useTaskRunner(): UseTaskRunnerReturn {
     connectionStateRef.current = "connecting";
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+    const wsUrl = token
+      ? `${protocol}//${window.location.host}/api/ws?token=${encodeURIComponent(token)}`
+      : `${protocol}//${window.location.host}/api/ws`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {

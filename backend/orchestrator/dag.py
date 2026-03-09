@@ -25,6 +25,7 @@ from backend.models.task import (
     WSEvent,
 )
 from backend.services.executor import execute_step
+from backend.services.metrics import STEP_COUNTER, STEP_DURATION
 from backend.telemetry import trace_span
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class DAGExecutor:
                 step.error = "dependency failed"
                 self._failed_ids.add(step.id)
                 newly_removed.append(step_id)
+                STEP_COUNTER.labels(executor=step.executor.value, status="skipped").inc()
                 logger.info(
                     "Skipping step %s (%s) — dependency chain broken",
                     step.id, step.action,
@@ -117,17 +119,21 @@ class DAGExecutor:
             },
         ))
 
-        with trace_span(
-            f"dag.step.{step.action}",
-            attributes={
-                "step.id": step.id,
-                "step.action": step.action,
-                "step.group": step.group,
-                "step.executor": step.executor.value,
-                "step.target": step.target,
-                "task.id": self.plan.task_id,
-            },
-        ) as span:
+        executor_label = step.executor.value
+        with (
+            trace_span(
+                f"dag.step.{step.action}",
+                attributes={
+                    "step.id": step.id,
+                    "step.action": step.action,
+                    "step.group": step.group,
+                    "step.executor": executor_label,
+                    "step.target": step.target,
+                    "task.id": self.plan.task_id,
+                },
+            ) as span,
+            STEP_DURATION.labels(executor=executor_label).time(),
+        ):
             context = self._collect_context_for(step)
             result = await execute_step(step, context=context, pool=self.pool)
             span.set_attribute("step.success", result.get("success", False))
@@ -183,6 +189,7 @@ class DAGExecutor:
                 if result.get("success"):
                     step.mark_completed(result)
                     self._completed[step_id] = result
+                    STEP_COUNTER.labels(executor=step.executor.value, status="completed").inc()
                     logger.info(
                         "DAG: step %s (%s) completed [group=%s]",
                         step_id, step.action, step.group,
@@ -196,6 +203,7 @@ class DAGExecutor:
                     err_msg = result.get("error", "unknown error")
                     step.mark_failed(err_msg)
                     self._failed_ids.add(step_id)
+                    STEP_COUNTER.labels(executor=step.executor.value, status="failed").inc()
                     logger.error(
                         "DAG: step %s (%s → %s) FAILED: %s",
                         step_id, step.action, step.target, err_msg,

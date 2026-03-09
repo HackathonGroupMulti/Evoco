@@ -13,14 +13,34 @@ import base64
 import json
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from backend.config import settings
+from backend.middleware.auth import decode_token
 from backend.models.task import OutputFormat, WSEvent
 from backend.orchestrator.pipeline import run_task
+from backend.services.metrics import WS_CONNECTIONS
 from backend.services.voice import VoiceStream
 
 logger = logging.getLogger(__name__)
+
+def _verify_ws_token(token: str | None) -> str | None:
+    """Validate a WS bearer token.  Returns user_id or None.
+
+    When JWT_SECRET is configured, an absent or invalid token closes the
+    connection (returns sentinel "REJECT").  When auth is disabled
+    (no JWT_SECRET), always returns None (anonymous allowed).
+    """
+    if not settings.jwt_secret:
+        return None  # auth disabled — anonymous access OK
+    if not token:
+        return "REJECT"
+    try:
+        payload = decode_token(token)
+        return payload.get("sub")
+    except Exception:
+        return "REJECT"
+
 
 router = APIRouter(tags=["websocket"])
 
@@ -72,7 +92,7 @@ manager = ConnectionManager()
 # ---------------------------------------------------------------------------
 
 @router.websocket("/api/ws")
-async def ws_run_task(ws: WebSocket) -> None:
+async def ws_run_task(ws: WebSocket, token: str | None = Query(None)) -> None:
     """Connect via WebSocket, send a command, and receive live events.
 
     Protocol:
@@ -82,6 +102,13 @@ async def ws_run_task(ws: WebSocket) -> None:
       4. Server sends final task_done event and the full TaskResult, then closes
     """
     await ws.accept()
+    WS_CONNECTIONS.inc()
+    user_id = _verify_ws_token(token)
+    if user_id == "REJECT":
+        await ws.send_text(json.dumps({"error": "Unauthorized"}))
+        await ws.close(1008)
+        WS_CONNECTIONS.dec()
+        return
     try:
         raw = await ws.receive_text()
         data = json.loads(raw)
@@ -126,6 +153,7 @@ async def ws_run_task(ws: WebSocket) -> None:
         except Exception:
             pass
     finally:
+        WS_CONNECTIONS.dec()
         try:
             await ws.close()
         except Exception:
@@ -137,7 +165,7 @@ async def ws_run_task(ws: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 
 @router.websocket("/api/ws/voice")
-async def ws_voice_stream(ws: WebSocket) -> None:
+async def ws_voice_stream(ws: WebSocket, token: str | None = Query(None)) -> None:
     """Stream audio from the client's microphone, transcribe, and execute.
 
     Protocol:
@@ -153,6 +181,13 @@ async def ws_voice_stream(ws: WebSocket) -> None:
       8. Connection closes
     """
     await ws.accept()
+    WS_CONNECTIONS.inc()
+    user_id = _verify_ws_token(token)
+    if user_id == "REJECT":
+        await ws.send_text(json.dumps({"error": "Unauthorized"}))
+        await ws.close(1008)
+        WS_CONNECTIONS.dec()
+        return
     stream: VoiceStream | None = None
 
     try:
@@ -235,6 +270,7 @@ async def ws_voice_stream(ws: WebSocket) -> None:
         except Exception:
             pass
     finally:
+        WS_CONNECTIONS.dec()
         try:
             await ws.close()
         except Exception:

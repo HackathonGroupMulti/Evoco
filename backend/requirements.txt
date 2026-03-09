@@ -1,3 +1,7 @@
+# nova_act is a private SDK — install separately:
+#   pip install nova-act  (requires NOVA_ACT_API_KEY)
+# It is not listed here because it is not on PyPI.
+
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 pydantic>=2.10.0
